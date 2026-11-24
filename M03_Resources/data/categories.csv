@@ -1,0 +1,95 @@
+category_id,category_name,parent_id
+101,Electronics,
+102,Phones,101
+103,Smartphones,102
+104,Feature Phones,102
+105,Phone Accessories,102
+106,Cases,105
+107,Chargers,105
+108,Screen Protectors,105
+109,Power Banks,105
+110,Computing,101
+111,Laptops,110
+112,Desktops,110
+113,Monitors,110
+114,Computer Accessories,110
+115,Keyboards,114
+116,Mice,114
+117,Laptop Bags,114
+118,Audio,101
+119,Headphones,118
+120,In-Ear,119
+121,Over-Ear,119
+122,True Wireless,119
+123,Speakers,118
+124,Soundbars,118
+125,Television,101
+126,Smart TVs,125
+127,TV Accessories,125
+128,Home Appliances,
+129,Kitchen,128
+130,Blenders,129
+131,Microwaves,129
+132,Cookers,129
+133,Kettles,129
+134,Laundry,128
+135,Washing Machines,134
+136,Irons,134
+137,Cooling,128
+138,Fans,137
+139,Air Conditioners,137
+140,Refrigerators,137
+141,Fashion,
+142,Women,141
+143,Dresses,142
+144,Women Footwear,142
+145,Women Bags,142
+146,Women Accessories,142
+147,Men,141
+148,Shirts,147
+149,Trousers,147
+150,Men Footwear,147
+151,Men Accessories,147
+152,Children,141
+153,Kids Clothing,152
+154,Kids Footwear,152
+155,Groceries,
+156,Beverages,155
+157,Soft Drinks,156
+158,Water,156
+159,Juices,156
+160,Tea and Coffee,156
+161,Staples,155
+162,Rice,161
+163,Oil,161
+164,Flour,161
+165,Sugar and Salt,161
+166,Household,155
+167,Cleaning,166
+168,Detergents,167
+169,Disinfectants,167
+170,Paper Goods,166
+171,Toiletries,166
+172,Health and Beauty,
+173,Personal Care,172
+174,Skincare,173
+175,Moisturisers,174
+176,Sunscreen,174
+177,Haircare,173
+178,Oral Care,173
+179,Wellness,172
+180,Supplements,179
+181,First Aid,179
+182,Baby and Toys,
+183,Baby,182
+184,Diapers,183
+185,Baby Feeding,183
+186,Baby Care,183
+187,Toys,182
+188,Educational Toys,187
+189,Outdoor Toys,187
+9001,Seasonal Promotions,9002
+9002,Promotions,9001
+9003,Clearance,8999
+9004,Flash Sale Items,
+9005,Back to School,9004
