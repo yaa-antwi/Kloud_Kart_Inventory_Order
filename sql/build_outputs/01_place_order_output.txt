@@ -1,0 +1,29 @@
+﻿docker : psql:sql/build/01_place_order.sql:42: NOTICE:  column "order_id" of relation "orders" is not an identity 
+column, skipping
+At line:1 char:1
++ docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (psql:sql/build/...olumn, skipping:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+psql:sql/build/01_place_order.sql:43: NOTICE:  column "order_item_id" of relation "order_items" is not an identity 
+column, skipping
+psql:sql/build/01_place_order.sql:44: NOTICE:  column "log_id" of relation "inventory_log" is not an identity column, 
+skipping
+ setval 
+--------
+ 659384
+(1 row)
+
+ setval  
+---------
+ 1236559
+(1 row)
+
+ setval 
+--------
+ 982487
+(1 row)
+
+psql:sql/build/01_place_order.sql:60: NOTICE:  constraint "products_stock_not_negative" of relation "products" does 
+not exist, skipping
