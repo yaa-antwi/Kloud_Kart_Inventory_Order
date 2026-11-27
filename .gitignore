@@ -1,12 +1,6 @@
 # Local credentials
 .env
 
-# Generated outputs
-logs/
-sql/build_outputs/
-sql/diagnosis_outputs/
-report_pack/
-
 # Python
 __pycache__/
 *.pyc
