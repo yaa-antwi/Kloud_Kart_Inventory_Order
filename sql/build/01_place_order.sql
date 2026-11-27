@@ -16,8 +16,8 @@
 --      movement to its order without reading text. Old rows stay empty.
 --   3. products gets a rule that stock cannot go below zero. It is added
 --      NOT VALID: the 14 products already below zero are not checked now and
---      need a physical count. Any new change that would leave a product below
---      zero is rejected, including a restock that still leaves it below zero.
+--      need a physical count. PostgreSQL still checks new rows and changed
+--      rows, so no new write can leave stock below zero.
 
 -- DECISIONS
 --   A. Lock the product row first (FOR UPDATE), then read the stock. A second
@@ -49,9 +49,8 @@
 --      products in product_id order.
 
 -- READ THIS
---   The guarantee holds only if every stock change goes through place_order
---   (sales), restock_product or correct_stock (file 04). A hand-written UPDATE
---   of stock bypasses it and leaves no trace.
+--   Stock changes must go through place_order (sales), restock_product or
+--   correct_stock (file 04). The trigger in file 04 rejects direct stock edits.
 
 -- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/01_place_order.sql
 
@@ -103,6 +102,7 @@ DECLARE
     v_stock    integer;
     v_price    numeric;
     v_order_id bigint;
+    v_stock_change_authorized text;
 BEGIN
     -- refuse bad input with a normal reply, not an error
     IF p_quantity IS NULL OR p_quantity <= 0 THEN
@@ -143,9 +143,15 @@ BEGIN
         RETURN;
     END IF;
 
+    v_stock_change_authorized := current_setting('kloudkart.stock_change_authorized', true);
+    PERFORM set_config('kloudkart.stock_change_authorized', 'on', true);
+
     UPDATE products
        SET stock_quantity = stock_quantity - p_quantity
      WHERE products.product_id = p_product_id;
+
+    PERFORM set_config('kloudkart.stock_change_authorized',
+                       coalesce(v_stock_change_authorized, ''), true);
 
     -- decisions D and E
     INSERT INTO orders (customer_id, order_date, status, total_amount)

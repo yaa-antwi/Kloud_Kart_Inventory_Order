@@ -20,25 +20,21 @@ $checksPath = Join-Path $buildOutputDir '02_checks.md'
 
 $envFile = Join-Path $PSScriptRoot '.env'
 
-if (-not (Test-Path $envFile)) {
-    throw "Missing .env file. Create it in the project root using the README instructions."
-}
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*([^#][^=]*)=(.*)$') {
+            $name = $matches[1].Trim()
+            $value = $matches[2].Trim()
 
-Get-Content $envFile | ForEach-Object {
-    if ($_ -match '^\s*([^#][^=]*)=(.*)$') {
-        $name = $matches[1].Trim()
-        $value = $matches[2].Trim()
-
-        [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
+                [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+            }
+        }
     }
 }
 
 if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
-    throw "DATABASE_URL is missing from .env."
-}
-
-if ([string]::IsNullOrWhiteSpace($env:POSTGRES_PASSWORD)) {
-    throw "POSTGRES_PASSWORD is missing from .env."
+    throw "Set DATABASE_URL in the environment or in the project .env file."
 }
 
 $env:PYTHONIOENCODING = 'utf-8'
@@ -158,11 +154,21 @@ Add-Content -Encoding utf8 -Path $reportPath -Value @(
 # Run SQL checks
 # --------------------------------------------------
 
-$checksCommand = 'docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f tests/99_checks.sql'
+$checksExecutable = 'docker'
+$checksArguments = @(
+    'exec',
+    '-w', '/lab',
+    '-i', 'kloudkart',
+    'psql',
+    '-U', 'postgres',
+    '-v', 'ON_ERROR_STOP=1',
+    '-f', 'tests/99_checks.sql'
+)
+$checksCommand = "$checksExecutable $($checksArguments -join ' ')"
 
 $checksOutput = @(
-    docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f tests/99_checks.sql 2>&1 |
-    ForEach-Object { "$_" }
+    & $checksExecutable @checksArguments 2>&1 |
+        ForEach-Object { "$_" }
 )
 
 $checksCode = $LASTEXITCODE
@@ -218,6 +224,10 @@ for ($run = 1; $run -le 3; $run++) {
         $raceOutput |
         Where-Object { $_ -cmatch '^PASSED' }
     ).Count -gt 0
+    $cleanupWarnings = @(
+        $raceOutput |
+        Where-Object { $_ -match 'fixture cleanup failed:' }
+    )
 
     $elapsedMatch = [regex]::Match(
         ($raceOutput -join "`n"),
@@ -235,12 +245,15 @@ for ($run = 1; $run -le 3; $run++) {
         $withinTimeLimit = $elapsedSeconds -le 10
     }
 
-    if ($raceCode -ne 0 -or -not $passed -or -not $withinTimeLimit) {
+    if ($raceCode -ne 0 -or -not $passed -or -not $withinTimeLimit -or $cleanupWarnings.Count -gt 0) {
 
         $script:failures++
 
         $reason = if (-not $elapsedMatch.Success) {
             'the 400-buyer wall-clock time was not reported'
+        }
+        elseif ($cleanupWarnings.Count -gt 0) {
+            'the race test reported a fixture cleanup failure'
         }
         elseif (-not $withinTimeLimit) {
             "the 400-buyer test took $elapsedSeconds seconds, over the 10-second limit"

@@ -17,7 +17,25 @@ New-Item -ItemType Directory -Force $logDir, $failDir, 'sql\build_outputs', 'sql
 
 $runLog = Join-Path $logDir 'run_log.md'
 
-$env:DATABASE_URL = 'postgresql://postgres:kloudkart@localhost:5432/postgres'
+$envFile = Join-Path $PSScriptRoot '.env'
+
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*([^#][^=]*)=(.*)$') {
+            $name = $matches[1].Trim()
+            $value = $matches[2].Trim()
+
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
+                [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+            }
+        }
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+    throw "Set DATABASE_URL in the environment or in the project .env file."
+}
+
 $env:PYTHONIOENCODING = 'utf-8'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -65,8 +83,26 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Start-Sleep -Seconds 5
-Write-Log 'OK' '01_start' 'database is running'
+$maxAttempts = 30
+$ready = $false
+
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    docker exec kloudkart pg_isready -U postgres -d postgres *> $null
+
+    if ($LASTEXITCODE -eq 0) {
+        $ready = $true
+        break
+    }
+
+    Start-Sleep -Seconds 1
+}
+
+if (-not $ready) {
+    Fail '01_start' "PostgreSQL was not ready after $maxAttempts seconds." @()
+    exit 1
+}
+
+Write-Log 'OK' '01_start' 'PostgreSQL is ready'
 
 # 2. Reset and load fresh data (DESTRUCTIVE)
 $out = docker exec -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" 2>&1 | ForEach-Object { "$_" }
@@ -119,10 +155,14 @@ for ($run = 1; $run -le 3; $run++) {
     $code = $LASTEXITCODE
 
     Add-Content -Encoding utf8 -Path $raceReport -Value (@("## Run $run", "", '```text') + $lines + @('```', ''))
-    Set-Content -Encoding utf8 -Path "sql\build_outputs\03_race_test_run$run.md" -Value (@("# Race test, run $run", "", "Written: $(Get-Date -Format 'yyyy-MM-dd HH:mm')", "", '```text') + $lines + '```')
-
     $passed = @($lines | Where-Object { $_ -cmatch '^PASSED' }).Count -gt 0
-    $bad = @($lines | Where-Object { $_ -cmatch 'FAIL|Traceback|ERROR' -or $_ -match '\b[1-9]\d* errored' })
+    $bad = @(
+        $lines |
+        Where-Object {
+            $_ -cmatch 'FAIL|Traceback|ERROR' -or
+            $_ -match '\b[1-9]\d* errored|fixture cleanup failed:'
+        }
+    )
     $elapsedMatch = [regex]::Match(($lines -join "`n"), 'wall clock ([0-9]+(?:\.[0-9]+)?)s')
     $withinTimeLimit = $false
     if ($elapsedMatch.Success) {

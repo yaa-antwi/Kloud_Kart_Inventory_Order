@@ -25,8 +25,10 @@ Kloud_Kart_Inventory_Order/
 ├── README.md
 ├── .env.example                         # Local database connection settings
 ├── .gitignore
+├── requirements.txt                     # Pinned Python test dependency
 ├── run_build.ps1
 ├── run_tests.ps1
+├── run_everything.ps1                   # Destructive fresh-load workflow
 ├── run_monday_report.ps1
 ├── M03_Resources/
 │   ├── data/                    # Six source CSV files
@@ -59,9 +61,7 @@ Kloud_Kart_Inventory_Order/
 
 For the investigation methods, ranked findings and limitations, see [`docs/data_findings.md`](docs/data_findings.md).
 
-The SQL validation checks are in `tests/99_checks.sql`. The supplied concurrency test is `M03_Resources/race_test.py`. It is the test used to check whether competing orders can oversell stock. Do not edit this supplied test.
-
-Older race-test copies and reports may remain in the project history. The current test runner uses the supplied test in `M03_Resources/` and saves new run results in `logs/`.
+The SQL validation checks are in `tests/99_checks.sql`. The single supplied concurrency test is `M03_Resources/race_test.py`; do not edit it. Automated race-test evidence is written to `logs/`. Generated files under `logs/`, `sql/build_outputs/`, `sql/diagnosis_outputs/` and `report_pack/` are local outputs and are ignored by Git.
 
 ## What each build file does
 
@@ -100,12 +100,12 @@ Run the commands below from the project root, one step at a time.
 If you do not already have a PostgreSQL container named `kloudkart`, create one:
 
 ```powershell
-docker run -d --name kloudkart -e POSTGRES_PASSWORD=your_local_password -p 5432:5432 -v "${PWD}:/lab" postgres:18 -c max_connections=500
+docker run -d --name kloudkart -e POSTGRES_PASSWORD=your_local_password -p 5432:5432 -v "${PWD}:/lab" postgres@sha256:a47637053e65dc7112aeb7353feb8b87954982ad5fd4524908c284d90d71b5e3 -c max_connections=500
 ```
 
 Replace `your_local_password` with the local password you intend to use. Use the same password in your `.env` file.
 
-The container is configured for up to 500 database connections because the concurrency test opens 400 connections.
+The image is pinned to the digest used by the local test container. The password and container command are for a disposable local lab only; do not reuse them in a shared or production environment. The container is configured for up to 500 database connections because the concurrency test opens 400 connections.
 
 **If the container already exists**
 
@@ -140,6 +140,7 @@ Replace `your_local_password` with the password used when the database container
 
 - `DATABASE_URL` tells the Python concurrency test how to connect to PostgreSQL.
 - `POSTGRES_PASSWORD` records the password used for the initial container setup.
+- A `DATABASE_URL` set in the PowerShell process takes precedence over the `.env` value.
 
 Keep `.env` out of Git. The `.gitignore` file should contain:
 
@@ -196,7 +197,7 @@ Expect these six row counts, in this order:
 ### Step 4: Create the output folders
 
 ```powershell
-New-Item -ItemType Directory -Force sql\build_outputs, sql\report, report_pack, logs | Out-Null
+New-Item -ItemType Directory -Force sql\build_outputs, sql\diagnosis_outputs, sql\report, report_pack, logs | Out-Null
 ```
 
 ### Step 5: Build the SQL solution
@@ -221,17 +222,17 @@ This runs the 13 SQL validation checks and writes:
 
 `sql/build_outputs/02_checks.md`
 
-Every check that reports a true/false result should show `t` for true.
+Every check that reports a true/false result should show `t` for true. Checks 4 and 5 are informational and do not gate the test run. Check 13 verifies the exact function signatures, the existing `NOT VALID` stock constraint, and that negative inserts and direct stock updates are rejected.
 
 ### Step 7: Run the concurrency test
 
-Install the Python package required to connect to PostgreSQL:
+Install the pinned Python package required to connect to PostgreSQL:
 
 ```powershell
-pip install psycopg2-binary
+pip install -r requirements.txt
 ```
 
-The `.env` file supplies the database connection details. The `run_tests.ps1` script loads those settings before running the concurrency test.
+Set `DATABASE_URL` in the process environment or in `.env`; the test scripts preserve a process-level value when one is already set.
 
 To run the SQL checks and concurrency test three times, use:
 
@@ -252,7 +253,7 @@ For the 400-buyer test, the expected result is:
 
 The test also checks repeated attempts to buy the last unit, insufficient-stock requests and stock movement records.
 
-The supplied test cleans up after itself. Do not edit `M03_Resources/race_test.py`.
+The supplied test removes its fixtures before and after each run. The automation treats a reported cleanup failure as a failed run. Do not edit `M03_Resources/race_test.py`.
 
 ### Step 8: Run the before-and-after speed comparison
 
@@ -292,6 +293,7 @@ Run these commands from PowerShell in the project root.
 | `run_build.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_build.ps1` | Runs the SQL build against the existing database. It does not reset or reload data or run tests. | Saves a command report in `logs/` and a build summary in `sql/build_outputs/`. |
 | `run_tests.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1` | Runs the 13 SQL checks and the concurrency test three times. It does not reset or reload data. | Saves detailed results in `logs/`. |
 | `run_monday_report.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_monday_report.ps1` | Generates the four Monday report CSV files. | Writes the CSV files to `report_pack/` and records the run in `logs/monday_report_log.md`. |
+| `run_everything.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_everything.ps1` | Drops and reloads the `public` schema, builds the project, checks it, runs the race test three times, and generates reports. **Destructive: use only with a disposable project database.** | Writes run details to `logs/` and build outputs to `sql/build_outputs/`. |
 
 The automated scripts use the existing database. If you need a clean starting point, follow Step 3 to reload the data before running them.
 
@@ -307,18 +309,35 @@ It uses customer `100001`, product `5001` and a quantity of one.
 
 This changes the database. To return to the original supplied data, follow Step 3 and reload the database.
 
-## What the project does not do
+## Data quality and operational limits
 
-- Manually changing a product's stock quantity bypasses the order-placement process and does not create a stock movement history record.
-- The 14 negative stock counts and 144 stock-history differences found during the investigation have not been corrected. A physical stock count is needed to establish the correct quantities.
+- Direct updates to `products.stock_quantity` are rejected by a guard trigger. Use `place_order`, `restock_product` or `correct_stock`; database superusers can bypass this operational guard.
+- The `products_stock_not_negative` check is `NOT VALID` so the 14 existing negative-stock rows do not prevent deployment. PostgreSQL still enforces it on new inserts and updates; the check suite verifies that behavior. A physical stock count is still needed to correct the old rows.
+- The 14 negative stock counts and 144 stock-history differences found during the investigation have not been corrected. Run `sql/diagnosis/02_wrong_numbers.sql` to review the full diagnosis. To get just the two counts, run:
+
+  ```sql
+  WITH movement_totals AS (
+      SELECT product_id, sum(change_qty) AS logged_stock
+      FROM inventory_log
+      GROUP BY product_id
+  )
+  SELECT count(*) FILTER (WHERE products.stock_quantity < 0) AS negative_stock_products,
+         count(*) FILTER (
+             WHERE products.stock_quantity IS DISTINCT FROM coalesce(movement_totals.logged_stock, 0)
+         ) AS stock_history_differences
+  FROM products
+  LEFT JOIN movement_totals ON movement_totals.product_id = products.product_id;
+  ```
+
+- The Monday CSV exports include customer names and email addresses. Treat them as sensitive business data; keep `report_pack/` local and do not share the files unless authorized.
 - The four-file report export runs on demand. It is not scheduled.
 - Adwoa's actual report was not available for testing. The reported 40-minute duration has not been independently verified; the before-and-after comparison uses a reconstruction of the likely report calculation.
 - The exact information displayed to customers on the website and the time zone used for date fields have not been verified.
-- The strict-setting test and the 120-level category-chain test were run on an older practice copy of the database, not the final shipped database version.
+- The strict-setting and 120-level category-chain experiments were run on an older practice database. They are not represented as evidence from the shipped database; the automated checks report only what they run against the current schema.
 
 ## Notes on the test evidence
 
-Two additional orders, `665625` and `665626`, were created while testing the five-second lock-wait limit. They were created after the saved SQL check results, so those earlier results do not include them.
+Older saved build/check reports may predate two orders (`665625` and `665626`) created while testing the five-second lock-wait limit. Treat those archived outputs as historical, not as a snapshot of the current database. For fresh evidence from the supplied data, use `run_everything.ps1` only with a disposable database; it resets the schema and reloads all source files.
 
 The five-second lock-wait limit and the response to a lock timeout are implemented in the `place_order` function in:
 
