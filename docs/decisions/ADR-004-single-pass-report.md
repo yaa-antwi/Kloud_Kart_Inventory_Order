@@ -52,7 +52,8 @@ What counts as spend:
 - **What this buys:** On your machine the all-customer summary took 0.19 to 0.28 seconds, the top 100 about 0.2 seconds, and the 12-month view with running totals about 1.0 second. It counted 140,015 orders worth 428,442,749.40 (no currency is named, because the data gives none).
 - **What this costs:** The report is not "the" answer where totals disagree, so it must be read with its notes.
 - **What it costs the client if I am wrong:** If pending orders should not count, spend is overstated. If duplicates are one person, a few rankings are split. Numbers stay wrong where the recorded total is wrong, until Nana says which is right.
-- **What would make me revisit this:** The report taking more than a few seconds, or Nana or Adwoa confirming what each status means. **Who decides:** Nana or finance for the totals and statuses, and Adwoa for what her report must count.
+- **What would make me revisit this:** The report taking more than a few seconds, or Nana or Adwoa confirming what each status means. 
+- **Who decides:** Nana or finance for the totals and statuses, and Adwoa for what her report must count.
 
 ## What this survives
 

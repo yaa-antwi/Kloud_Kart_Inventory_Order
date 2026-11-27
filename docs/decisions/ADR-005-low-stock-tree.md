@@ -39,7 +39,8 @@ Out of stock means 0 or fewer units. Low means above 0 and below 5. The 5 sits i
 - **What this buys:** The real tree has 4 levels and works. On a practice copy, a chain of 120 levels was read to the end. On your machine, the top-level lines plus the two extra lines add up to all 4,023 products, 591 out of stock and 833 low (checks passed). 91 of 94 categories are reached from the top.
 - **What this costs:** 1,424 flagged products is 35% of the catalogue, probably too long to act on in one go. The out-of-stock products sit in their own column, so Nana can read those first. The 3 categories that cannot be reached, and the products under them, appear only on the "Unreachable" line.
 - **What it costs the client if I am wrong:** A long list may get ignored (one command lowers it to 2, which flags 548 low). A product in the wrong category is counted in the wrong branch; the correct category for the 43 affected products needs confirming.
-- **What would make me revisit this:** Nana saying the list is too long, or a supplier delivery time longer than the stock lasts. **Who decides:** Nana for the cut-off, and marketing for the correct categories.
+- **What would make me revisit this:** Nana saying the list is too long, or a supplier delivery time longer than the stock lasts. 
+- **Who decides:** Nana for the cut-off, and marketing for the correct categories.
 
 ## What this survives
 

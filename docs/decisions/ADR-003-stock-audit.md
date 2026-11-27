@@ -31,7 +31,8 @@ Three functions (place an order, restock, correct the count) each write their ow
 - **What this buys:** A simple design that passed the race test's audit check (5 sold, 5 movements recorded) in all three runs. On your machine, restock and correction both worked, and a correction with no reason was refused.
 - **What this costs:** A stock number typed in by hand leaves no history row.
 - **What it costs the client if I am wrong:** An unrecorded change shows up later as one more product whose stock disagrees with its history, like the 144 already found.
-- **What would make me revisit this:** Finding that anything other than the three functions changes stock. Then add the trigger. **Who decides:** Nana, with whoever looks after the website (they know what else changes stock).
+- **What would make me revisit this:** Finding that anything other than the three functions changes stock. Then add the trigger. 
+- **Who decides:** Nana, with whoever looks after the website (they know what else changes stock).
 
 ## What this survives
 

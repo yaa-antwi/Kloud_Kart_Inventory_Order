@@ -2,7 +2,7 @@
 
 ## The problem it solves
 
-Adwoa's Monday report took about 40 minutes and sometimes did not finish. Even with the report now fast, someone still has to open the database and type a query to get the figures out, and Adwoa was still keeping the running totals by hand. Nana wanted her to run nothing by hand again.
+Adwoa's Monday report took about 40 minutes and sometimes did not finish. Even with the report now fast, someone still has to open the database and type a query to get the figures out, and Adwoa was still keeping the running totals by hand. 
 
 ## What I built
 

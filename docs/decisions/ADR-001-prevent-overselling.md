@@ -50,7 +50,8 @@ Four smaller choices go with it:
 - **What this buys:** Exactly one buyer gets the last unit. On your machine, 25 of 25 two-buyer rounds had one winner, and the 400-buyer test sold exactly 50 of 50 units with 0 errors, in all three runs. Every refused buyer got "Out of stock". The 5-second limit was seen firing on your machine: "Busy, please try again" after 5.005 seconds, with nothing written.
 - **What this costs:** Buyers of the same product queue. In the 400-buyer test everyone was answered in about 2.2 to 2.5 seconds and the longest single wait was 1.07 seconds. That is quick, but it is not instant for everyone. Two buyers racing for the last unit were answered in about 5 to 15 milliseconds. The numbering leaves harmless gaps.
 - **What it costs the client if I am wrong:** On a slower server a buyer could hear "Busy" while stock remains (one number to change). If another system writes numbers by hand, they could clash; I have not seen the website or any other system.
-- **What would make me revisit this:** "Busy" appearing in normal use, or a sale far bigger than the one in the brief. My practice copy handled about 440 to 530 orders per second on one product; the brief needs about 40. **Who decides:** Nana, with whoever looks after the website and other systems (they would see "Busy" replies and any clashing numbers).
+- **What would make me revisit this:** "Busy" appearing in normal use, or a sale far bigger than the one in the brief. My practice copy handled about 440 to 530 orders per second on one product; the brief needs about 40. 
+- **Who decides:** Nana, with whoever looks after the website and other systems (they would see "Busy" replies and any clashing numbers).
 
 ## What this survives
 

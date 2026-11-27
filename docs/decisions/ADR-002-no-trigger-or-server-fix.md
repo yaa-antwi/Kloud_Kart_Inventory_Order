@@ -31,7 +31,8 @@ Do not rely on either. A trigger is an automatic reaction that runs when a recor
 - **What this buys:** Nana's money goes to the real fix, and he does not buy hardware that would not help.
 - **What this costs:** Nothing extra.
 - **What it costs the client if I am wrong:** A trigger-only build would oversell in a rush, the same way it did before.
-- **What would make me revisit this:** Nothing for overselling. The trigger idea returns only for record keeping. **Who decides:** Nobody needs to. Nana only if he wants to revisit hardware.
+- **What would make me revisit this:** Nothing for overselling. The trigger idea returns only for record keeping. 
+- **Who decides:** Nobody needs to. Nana only if he wants to revisit hardware.
 
 ## What this survives
 
