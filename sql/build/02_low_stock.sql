@@ -1,215 +1,165 @@
--- BUILD 2: LOW STOCK BY CATEGORY
+-- BUILD 2: LOW STOCK, ROLLED UP THROUGH THE CATEGORY TREE
 
 -- WHAT THIS DOES
---   Adds a view, low_stock_by_category, that shows for every category how
---   many products are out of stock and how many are running low. Each
---   category's figure counts the products directly in it AND everything
---   beneath it, however deep the tree goes. Nothing about the depth is
---   written into the query.
+--   low_stock_by_category gives, for every category, how many products are out
+--   of stock or low, counting the products directly in the category ("here")
+--   and everything beneath it ("in branch"). Two extra lines show the products
+--   the tree cannot place, so the figures always add up to the whole catalogue.
 
--- NEW OBJECTS (schema changes, documented for Nana's team)
---   stock_settings        one row holding the low-stock number, so it can be
---                         changed in one place
---   category_tree         every category reachable from a top category, with
---                         its depth and its full path
---   category_branches     for every category, every category beneath it
---   low_stock_by_category the view Adwoa and Nana read
-
--- DECISIONS (each one is a judgement call and can be changed)
---   A. "Out of stock" means stock of zero or less. This includes the 14
---      products already below zero.
---   B. "Low stock" means stock above zero but below the number in
---      stock_settings. The starting number is 5. It is my judgement: with a
---      median stock of 12, a rule of 10 would flag almost half of all
---      products, which is not "at a glance". Change it with:
---        UPDATE stock_settings SET low_stock_threshold = 10;
---   C. Out of stock and low stock are separate columns, so a product that is
---      already gone is not buried inside "low".
---   D. Every figure comes in two forms: "here" (products directly in this
---      category) and "in_branch" (this category plus everything beneath it).
---      The in_branch figure never counts a product twice within one row.
---      Adding the rows of different depths together WOULD count products
---      twice, so only add rows of one depth, or use the top level.
---   E. Products with no category, and products in categories that cannot
---      be reached from the top of the tree (a loop or a missing parent), get
---      their own two lines at the bottom. They are shown, never dropped.
---   F. It is a normal view, not a stored copy, so the figures are always
---      current. Stock changes with every order, and a stored copy would
---      go stale.
---   G. Two safeguards stop a loop running forever: a depth limit of 20, and
---      PostgreSQL's CYCLE clause, which marks the row where a loop closes.
---      The 20 is a safety limit, not an assumption about the tree: the tree
---      is 4 levels deep today.
---      Honest note: walking DOWN from the top categories can never enter a
---      loop, because each category has only one parent, so a loop is always
---      cut off from the top. The safeguards stay in case the tree is ever
---      walked another way.
+-- DECISIONS
+--   A. Out of stock means stock of zero or below (this includes the 14 products
+--      below zero). Low means above zero but under the threshold. The two are
+--      separate columns, because they ask for different action.
+--   B. The threshold lives in one row (stock_settings) so Nana can change it
+--      without touching code:  UPDATE stock_settings SET low_stock_threshold = 10;
+--      It starts at 5. Cost if wrong: products wrongly flagged or missed.
+--   C. "In branch" means the category itself plus everything beneath it. A
+--      product is counted once in its own category and once in each category
+--      above it, so do not add a category's figure to its parent's.
+--   D. The depth of the tree is not written anywhere. The walk starts at the
+--      top categories and goes down until nothing is left. Two protections
+--      stop a bad tree from running forever: the CYCLE clause marks a loop, and
+--      a bound equal to the NUMBER OF CATEGORIES. A tree with no loop can never
+--      be deeper than its own category count, so the bound never cuts off a
+--      real tree, and it grows with the data.
+--   E. A normal view, not a stored copy: stock changes with every order, and
+--      the whole view reads in well under a second.
+--   F. The threshold is read through a one-row subquery, not a join, so a
+--      settings table that has never been analysed cannot mislead the plan
+--      (see decision H in file 03).
 
 -- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/02_low_stock.sql
-
--- BUILD
 
 \set QUIET on
 
 
--- The low-stock number lives in one place. The id column and its rule keep
--- the table to a single row.
 CREATE TABLE IF NOT EXISTS stock_settings (
-    setting_id           boolean PRIMARY KEY DEFAULT true CHECK (setting_id),
-    low_stock_threshold  integer NOT NULL DEFAULT 5 CHECK (low_stock_threshold > 0)
+    only_row            boolean PRIMARY KEY DEFAULT true CHECK (only_row),
+    low_stock_threshold integer NOT NULL DEFAULT 5 CHECK (low_stock_threshold > 0)
 );
 
-INSERT INTO stock_settings DEFAULT VALUES
-ON CONFLICT DO NOTHING;
+INSERT INTO stock_settings (only_row) VALUES (true)
+ON CONFLICT (only_row) DO NOTHING;
 
 
--- Every category that can be reached from a top category, with its depth
--- and its path, for example: Electronics > Phones > Phone Accessories
+-- Every category reachable from a top category, with its depth and path.
 CREATE OR REPLACE VIEW category_tree AS
-WITH RECURSIVE tree AS (
-    -- start: the top categories, which have no parent
-    SELECT
-        categories.category_id,
-        COALESCE(categories.category_name, '(no name)')       AS category_name,
-        categories.parent_id,
-        1                                                     AS depth,
-        COALESCE(categories.category_name, '(no name)')::text AS path
+WITH RECURSIVE walk AS (
+    -- starting rows: the top categories
+    SELECT categories.category_id,
+           categories.category_name,
+           categories.parent_id,
+           1                            AS depth,
+           ARRAY[categories.category_id] AS ancestor_ids,   -- itself and every category above
+           categories.category_name::text AS path
     FROM categories
     WHERE categories.parent_id IS NULL
 
     UNION ALL
 
-    -- repeat: the children of the categories found in the last round
-    SELECT
-        categories.category_id,
-        COALESCE(categories.category_name, '(no name)'),
-        categories.parent_id,
-        tree.depth + 1,
-        tree.path || ' > ' || COALESCE(categories.category_name, '(no name)')
-    FROM categories
-    JOIN tree
-        ON categories.parent_id = tree.category_id
-    WHERE tree.depth < 20                      -- safeguard 1: depth limit
+    -- each round: the children of the previous round
+    SELECT child.category_id,
+           child.category_name,
+           child.parent_id,
+           walk.depth + 1,
+           walk.ancestor_ids || child.category_id,
+           walk.path || ' > ' || child.category_name
+    FROM categories AS child
+    JOIN walk
+      ON child.parent_id = walk.category_id
+    WHERE walk.depth < (SELECT count(*) FROM categories)    -- decision D
 )
-CYCLE category_id SET is_loop USING loop_path  -- safeguard 2: loop marker
-SELECT
-    category_id,
-    category_name,
-    parent_id,
-    depth,
-    path
-FROM tree
-WHERE NOT is_loop;
+CYCLE category_id SET is_loop USING loop_path
+SELECT walk.category_id,
+       walk.category_name,
+       walk.parent_id,
+       walk.depth,
+       walk.ancestor_ids,
+       walk.path
+FROM walk
+WHERE NOT walk.is_loop;
 
 
--- For every category, itself and every category beneath it
+-- One row for every (category, category beneath it), the category itself included.
 CREATE OR REPLACE VIEW category_branches AS
-WITH RECURSIVE branch AS (
-    -- start: each reachable category is the top of its own branch
-    SELECT
-        category_tree.category_id AS ancestor_id,
-        category_tree.category_id AS descendant_id,
-        0                         AS steps_down
-    FROM category_tree
-
-    UNION ALL
-
-    -- repeat: move one level further down every branch
-    SELECT
-        branch.ancestor_id,
-        categories.category_id,
-        branch.steps_down + 1
-    FROM branch
-    JOIN categories
-        ON categories.parent_id = branch.descendant_id
-    WHERE branch.steps_down < 20
-)
-CYCLE descendant_id SET is_loop USING loop_path
-SELECT
-    ancestor_id,
-    descendant_id
-FROM branch
-WHERE NOT is_loop;
+SELECT ancestor.ancestor_id,
+       category_tree.category_id
+FROM category_tree
+CROSS JOIN LATERAL unnest(category_tree.ancestor_ids) AS ancestor(ancestor_id);
 
 
--- The view people read
 CREATE OR REPLACE VIEW low_stock_by_category AS
-WITH threshold AS (
-    SELECT low_stock_threshold AS value
-    FROM stock_settings
-),
--- one row per category: its own products, counted once
-product_flags AS (
-    SELECT
-        products.category_id,
-        count(*) AS products,
-        count(*) FILTER (
-            WHERE products.stock_quantity <= 0
-        ) AS out_of_stock,
-        count(*) FILTER (
-            WHERE products.stock_quantity > 0
-              AND products.stock_quantity < (SELECT value FROM threshold)
-        ) AS low_stock
+WITH stock_by_category AS (
+    -- products counted once per category, before any rolling up
+    SELECT products.category_id,
+           count(*)                                                    AS products_here,
+           count(*) FILTER (WHERE products.stock_quantity <= 0)        AS out_of_stock_here,
+           count(*) FILTER (WHERE products.stock_quantity > 0
+                              AND products.stock_quantity < (SELECT stock_settings.low_stock_threshold
+                                                             FROM stock_settings))
+                                                                       AS low_stock_here
     FROM products
     GROUP BY products.category_id
 ),
--- one row per category: its own products plus everything beneath it
 branch_totals AS (
-    SELECT
-        category_branches.ancestor_id                           AS category_id,
-        COALESCE(SUM(product_flags.products), 0)::bigint        AS products,
-        COALESCE(SUM(product_flags.out_of_stock), 0)::bigint    AS out_of_stock,
-        COALESCE(SUM(product_flags.low_stock), 0)::bigint       AS low_stock
+    SELECT category_branches.ancestor_id          AS category_id,
+           sum(stock_by_category.products_here)::bigint      AS products_in_branch,
+           sum(stock_by_category.out_of_stock_here)::bigint  AS out_of_stock_in_branch,
+           sum(stock_by_category.low_stock_here)::bigint     AS low_stock_in_branch
     FROM category_branches
-    LEFT JOIN product_flags
-        ON product_flags.category_id = category_branches.descendant_id
+    JOIN stock_by_category
+      ON stock_by_category.category_id = category_branches.category_id
     GROUP BY category_branches.ancestor_id
 )
-SELECT
-    category_tree.category_id,
-    category_tree.path                                   AS category_path,
-    category_tree.depth,
-    COALESCE(product_flags.products, 0)                  AS products_here,
-    COALESCE(product_flags.out_of_stock, 0)              AS out_of_stock_here,
-    COALESCE(product_flags.low_stock, 0)                 AS low_stock_here,
-    branch_totals.products                               AS products_in_branch,
-    branch_totals.out_of_stock                           AS out_of_stock_in_branch,
-    branch_totals.low_stock                              AS low_stock_in_branch
+SELECT category_tree.category_id,
+       category_tree.category_name,
+       category_tree.depth,
+       category_tree.path,
+       coalesce(stock_by_category.products_here, 0)         AS products_here,
+       coalesce(stock_by_category.out_of_stock_here, 0)     AS out_of_stock_here,
+       coalesce(stock_by_category.low_stock_here, 0)        AS low_stock_here,
+       coalesce(branch_totals.products_in_branch, 0)        AS products_in_branch,
+       coalesce(branch_totals.out_of_stock_in_branch, 0)    AS out_of_stock_in_branch,
+       coalesce(branch_totals.low_stock_in_branch, 0)       AS low_stock_in_branch
 FROM category_tree
-JOIN branch_totals
-    ON branch_totals.category_id = category_tree.category_id
-LEFT JOIN product_flags
-    ON product_flags.category_id = category_tree.category_id
+LEFT JOIN stock_by_category
+  ON stock_by_category.category_id = category_tree.category_id
+LEFT JOIN branch_totals
+  ON branch_totals.category_id = category_tree.category_id
 
 UNION ALL
 
--- decision E: products with no category
-SELECT
-    NULL::integer,
-    'Uncategorised (no category set)',
-    NULL::integer,
-    COALESCE(SUM(products), 0)::bigint,
-    COALESCE(SUM(out_of_stock), 0)::bigint,
-    COALESCE(SUM(low_stock), 0)::bigint,
-    COALESCE(SUM(products), 0)::bigint,
-    COALESCE(SUM(out_of_stock), 0)::bigint,
-    COALESCE(SUM(low_stock), 0)::bigint
-FROM product_flags
-WHERE category_id IS NULL
+-- products with no category at all
+SELECT NULL::integer,
+       'Uncategorised'::text,
+       NULL::integer,
+       'Uncategorised'::text,
+       coalesce(sum(stock_by_category.products_here), 0)::bigint,
+       coalesce(sum(stock_by_category.out_of_stock_here), 0)::bigint,
+       coalesce(sum(stock_by_category.low_stock_here), 0)::bigint,
+       coalesce(sum(stock_by_category.products_here), 0)::bigint,
+       coalesce(sum(stock_by_category.out_of_stock_here), 0)::bigint,
+       coalesce(sum(stock_by_category.low_stock_here), 0)::bigint
+FROM stock_by_category
+WHERE stock_by_category.category_id IS NULL
 
 UNION ALL
 
--- decision E: products whose category cannot be reached from the top
-SELECT
-    NULL::integer,
-    'Unreachable (category in a loop or with a missing parent)',
-    NULL::integer,
-    COALESCE(SUM(products), 0)::bigint,
-    COALESCE(SUM(out_of_stock), 0)::bigint,
-    COALESCE(SUM(low_stock), 0)::bigint,
-    COALESCE(SUM(products), 0)::bigint,
-    COALESCE(SUM(out_of_stock), 0)::bigint,
-    COALESCE(SUM(low_stock), 0)::bigint
-FROM product_flags
-WHERE category_id IS NOT NULL
-  AND category_id NOT IN (SELECT category_id FROM category_tree);
+-- products whose category cannot be reached from the top (a loop or a missing parent)
+SELECT NULL::integer,
+       'Unreachable (category in a loop or with a missing parent)'::text,
+       NULL::integer,
+       'Unreachable'::text,
+       coalesce(sum(stock_by_category.products_here), 0)::bigint,
+       coalesce(sum(stock_by_category.out_of_stock_here), 0)::bigint,
+       coalesce(sum(stock_by_category.low_stock_here), 0)::bigint,
+       coalesce(sum(stock_by_category.products_here), 0)::bigint,
+       coalesce(sum(stock_by_category.out_of_stock_here), 0)::bigint,
+       coalesce(sum(stock_by_category.low_stock_here), 0)::bigint
+FROM stock_by_category
+WHERE stock_by_category.category_id IS NOT NULL
+  AND NOT EXISTS (
+        SELECT 1
+        FROM category_tree
+        WHERE category_tree.category_id = stock_by_category.category_id
+      );

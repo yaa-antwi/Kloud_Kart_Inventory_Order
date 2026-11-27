@@ -1,44 +1,64 @@
 -- BUILD 1: PLACE AN ORDER WITHOUT OVERSELLING
 
 -- WHAT THIS DOES
---   Adds the function place_order(customer, product, quantity). It locks
---   the product row, checks stock, and then in one transaction lowers
---   stock, creates the order and its item, and writes the stock log row.
---   A refused order is a normal reply (success = false), never an error.
+--   Adds place_order(customer, product, quantity). It locks the product row,
+--   checks the stock, then in one transaction lowers the stock, creates the
+--   order and its item, and writes the stock movement. A refused order is a
+--   normal reply (success = false), never an error.
 
 -- SCHEMA CHANGES (documented for Nana's team)
---   1. orders.order_id, order_items.order_item_id and inventory_log.log_id
---      had no way to generate a new number. They now generate their own,
---      continuing after the highest existing number. Explicit numbers are
---      still accepted, so the data load is not affected.
---   2. products gets a rule that stock cannot go below zero. It is added
---      NOT VALID: the 14 products already below zero are not checked now
---      and need their own decision (a physical count). Any new change that
---      would push a product below zero is rejected.
+--   1. orders.order_id, order_items.order_item_id and inventory_log.log_id had
+--      no way to make a new number. They now make their own, continuing after
+--      the highest existing number. Numbers typed by hand are still accepted,
+--      so the data load is not affected. Cost: gaps in the numbering after a
+--      failed order (harmless).
+--   2. inventory_log gets an order_id column, so an auditor can go from a stock
+--      movement to its order without reading text. Old rows stay empty.
+--   3. products gets a rule that stock cannot go below zero. It is added
+--      NOT VALID: the 14 products already below zero are not checked now and
+--      need a physical count. Any new change that would leave a product below
+--      zero is rejected, including a restock that still leaves it below zero.
 
 -- DECISIONS
---   A. Lock the product row first (FOR UPDATE). A second buyer waits there
---      until the first commits, then reads the fresh stock.
---   B. Wait at most 15 seconds for the lock, then answer "Busy". Without a
---      limit a buyer could wait forever. The 15 seconds is my judgement.
---   C. Check the customer BEFORE taking the lock, so the lock is held only
---      for the stock work. 210 existing orders name a customer who does not
---      exist (F-07), so new orders for unknown customers are refused.
---   D. The order total is written from the item (price times quantity),
---      so new orders cannot disagree with their items (F-03).
---   E. New orders start as 'pending', one of the 7 existing real statuses.
+--   A. Lock the product row first (FOR UPDATE), then read the stock. A second
+--      buyer waits at that line until the first one commits, then reads the
+--      fresh stock and is refused cleanly.
+--      Rejected: Repeatable Read / Serializable. They turn the race into an
+--      error (SQLSTATE 40001) that must be retried, and a function cannot
+--      commit and restart itself. The race test counts any error as a failure.
+--      Rejected: NOWAIT (errors at once), SKIP LOCKED (pretends a locked
+--      product does not exist), FOR SHARE (two holders can deadlock).
+--   B. Wait at most 5 seconds for the lock, then answer "Busy, please try
+--      again". With no limit one stuck transaction freezes every buyer of the
+--      product. 5 seconds is shorter than the 10 second flash sale in the brief.
+--      Measured on the client's machine: with 400 buyers released at the same
+--      instant, the longest wait was about 1.3 seconds, so 5 seconds leaves
+--      about 4 times the room. A limit under about 2 seconds would leave too
+--      little room, and a buyer could be told "Busy" while stock exists.
+--      The limit sits on the function, so the caller's own setting is
+--      restored when the function ends. Cost if wrong: a buyer turned away who
+--      could have bought. "Busy" is only given before anything is written, so
+--      trying again is safe.
+--   C. Check the customer BEFORE taking the lock, so the lock is held only for
+--      the stock work. 210 existing orders name a customer who is not on file.
+--   D. The order total is written from the item (price times quantity), so a
+--      new order cannot disagree with its items.
+--   E. New orders start as 'pending', one of the 7 real statuses.
+--   F. One product per call, as the test fixes. A single product cannot
+--      deadlock. If orders with several products are ever added, lock the
+--      products in product_id order.
 
--- READ THIS: the guarantee holds only if every writer goes through
---   place_order. A hand-written UPDATE of stock bypasses it.
+-- READ THIS
+--   The guarantee holds only if every stock change goes through place_order
+--   (sales), restock_product or correct_stock (file 04). A hand-written UPDATE
+--   of stock bypasses it and leaves no trace.
 
 -- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/01_place_order.sql
-
--- BUILD
 
 \set QUIET on
 
 
--- Let the three id columns generate their own numbers.
+-- Let the three id columns make their own numbers.
 ALTER TABLE orders        ALTER COLUMN order_id      DROP IDENTITY IF EXISTS;
 ALTER TABLE order_items   ALTER COLUMN order_item_id DROP IDENTITY IF EXISTS;
 ALTER TABLE inventory_log ALTER COLUMN log_id        DROP IDENTITY IF EXISTS;
@@ -56,6 +76,10 @@ SELECT setval(pg_get_serial_sequence('inventory_log', 'log_id'),
               (SELECT max(log_id) FROM inventory_log));
 
 
+-- A movement can name the order that caused it.
+ALTER TABLE inventory_log ADD COLUMN IF NOT EXISTS order_id integer;
+
+
 -- Safety net: stock may never go below zero from now on.
 ALTER TABLE products DROP CONSTRAINT IF EXISTS products_stock_not_negative;
 ALTER TABLE products ADD CONSTRAINT products_stock_not_negative
@@ -68,7 +92,9 @@ CREATE OR REPLACE FUNCTION place_order(
     p_quantity    integer
 )
 RETURNS TABLE (success boolean, order_id bigint, message text)
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET lock_timeout = '5s'           -- decision B, restored when the function ends
+AS $$
 -- The test reads the result by the names success, order_id and message, so
 -- those output names must stay. Two of them are also column names, so every
 -- column used in the body is written with its table name in front, and
@@ -93,9 +119,6 @@ BEGIN
         RETURN QUERY SELECT false, NULL::bigint, 'Customer not found'::text;
         RETURN;
     END IF;
-
-    -- decision B: wait at most 15 seconds for the lock (this transaction only)
-    PERFORM set_config('lock_timeout', '15s', true);
 
     BEGIN
         -- decision A: the lock. The second buyer waits here.
@@ -133,9 +156,9 @@ BEGIN
     VALUES (v_order_id, p_product_id, p_quantity, v_price);
 
     -- same shape as the existing log: reason 'sale', negative for outward
-    INSERT INTO inventory_log (product_id, change_qty, reason, created_at, note)
+    INSERT INTO inventory_log (product_id, change_qty, reason, created_at, note, order_id)
     VALUES (p_product_id, -p_quantity, 'sale', now(),
-            'order ' || v_order_id);
+            'order ' || v_order_id, v_order_id);
 
     RETURN QUERY SELECT true, v_order_id, 'Order placed'::text;
 END $$;
