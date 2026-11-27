@@ -102,7 +102,9 @@ DECLARE
     v_stock    integer;
     v_price    numeric;
     v_order_id bigint;
-    v_stock_change_authorized text;
+    v_previous_reason   text;
+    v_previous_note     text;
+    v_previous_order_id text;
 BEGIN
     -- refuse bad input with a normal reply, not an error
     IF p_quantity IS NULL OR p_quantity <= 0 THEN
@@ -143,28 +145,27 @@ BEGIN
         RETURN;
     END IF;
 
-    v_stock_change_authorized := current_setting('kloudkart.stock_change_authorized', true);
-    PERFORM set_config('kloudkart.stock_change_authorized', 'on', true);
+    INSERT INTO orders (customer_id, order_date, status, total_amount)
+    VALUES (p_customer_id, now(), 'pending', v_price * p_quantity)
+    RETURNING orders.order_id INTO v_order_id;
+
+    v_previous_reason := current_setting('kloudkart.stock_change_reason', true);
+    v_previous_note := current_setting('kloudkart.stock_change_note', true);
+    v_previous_order_id := current_setting('kloudkart.stock_change_order_id', true);
+    PERFORM set_config('kloudkart.stock_change_reason', 'sale', true);
+    PERFORM set_config('kloudkart.stock_change_note', 'order ' || v_order_id, true);
+    PERFORM set_config('kloudkart.stock_change_order_id', v_order_id::text, true);
 
     UPDATE products
        SET stock_quantity = stock_quantity - p_quantity
      WHERE products.product_id = p_product_id;
 
-    PERFORM set_config('kloudkart.stock_change_authorized',
-                       coalesce(v_stock_change_authorized, ''), true);
-
-    -- decisions D and E
-    INSERT INTO orders (customer_id, order_date, status, total_amount)
-    VALUES (p_customer_id, now(), 'pending', v_price * p_quantity)
-    RETURNING orders.order_id INTO v_order_id;
+    PERFORM set_config('kloudkart.stock_change_reason', coalesce(v_previous_reason, ''), true);
+    PERFORM set_config('kloudkart.stock_change_note', coalesce(v_previous_note, ''), true);
+    PERFORM set_config('kloudkart.stock_change_order_id', coalesce(v_previous_order_id, ''), true);
 
     INSERT INTO order_items (order_id, product_id, quantity, unit_price)
     VALUES (v_order_id, p_product_id, p_quantity, v_price);
-
-    -- same shape as the existing log: reason 'sale', negative for outward
-    INSERT INTO inventory_log (product_id, change_qty, reason, created_at, note, order_id)
-    VALUES (p_product_id, -p_quantity, 'sale', now(),
-            'order ' || v_order_id, v_order_id);
 
     RETURN QUERY SELECT true, v_order_id, 'Order placed'::text;
 END $$;

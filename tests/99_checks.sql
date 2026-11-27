@@ -16,7 +16,7 @@ BEGIN;
 CREATE TEMP TABLE stock_guard_probe (
     negative_insert_blocked boolean NOT NULL,
     negative_update_blocked boolean NOT NULL,
-    direct_update_blocked   boolean NOT NULL
+    direct_update_logged    boolean NOT NULL
 ) ON COMMIT DROP;
 
 DO $$
@@ -24,10 +24,10 @@ DECLARE
     v_probe_product_id       integer;
     v_existing_product_id    integer;
     v_existing_stock         integer;
+    v_log_id_before          integer;
     v_negative_insert_blocked boolean := false;
     v_negative_update_blocked boolean := false;
-    v_direct_update_blocked   boolean := false;
-    v_previous_authorization text;
+    v_direct_update_logged    boolean := false;
 BEGIN
     SELECT coalesce(max(products.product_id), 0) + 1
       INTO v_probe_product_id
@@ -44,14 +44,11 @@ BEGIN
       INTO v_existing_product_id, v_existing_stock
       FROM products
      WHERE products.stock_quantity >= 0
+       AND products.stock_quantity < 2147483647
      ORDER BY products.product_id
      LIMIT 1;
 
     IF v_existing_product_id IS NOT NULL THEN
-        v_previous_authorization :=
-            current_setting('kloudkart.stock_change_authorized', true);
-        PERFORM set_config('kloudkart.stock_change_authorized', 'on', true);
-
         BEGIN
             UPDATE products
                SET stock_quantity = -1
@@ -60,24 +57,31 @@ BEGIN
             v_negative_update_blocked := true;
         END;
 
-        PERFORM set_config('kloudkart.stock_change_authorized',
-                           coalesce(v_previous_authorization, ''), true);
+        SELECT coalesce(max(inventory_log.log_id), 0)
+          INTO v_log_id_before
+          FROM inventory_log;
 
-        BEGIN
-            UPDATE products
-               SET stock_quantity = v_existing_stock + 1
-             WHERE products.product_id = v_existing_product_id;
+        UPDATE products
+           SET stock_quantity = v_existing_stock + 1
+         WHERE products.product_id = v_existing_product_id;
 
-            UPDATE products
-               SET stock_quantity = v_existing_stock
-             WHERE products.product_id = v_existing_product_id;
-        EXCEPTION WHEN insufficient_privilege THEN
-            v_direct_update_blocked := true;
-        END;
+        SELECT EXISTS (
+            SELECT 1
+            FROM inventory_log
+            WHERE inventory_log.log_id > v_log_id_before
+              AND inventory_log.product_id = v_existing_product_id
+              AND inventory_log.change_qty = 1
+              AND inventory_log.reason = 'manual_update'
+        )
+          INTO v_direct_update_logged;
+
+        UPDATE products
+           SET stock_quantity = v_existing_stock
+         WHERE products.product_id = v_existing_product_id;
     END IF;
 
     INSERT INTO pg_temp.stock_guard_probe
-    VALUES (v_negative_insert_blocked, v_negative_update_blocked, v_direct_update_blocked);
+    VALUES (v_negative_insert_blocked, v_negative_update_blocked, v_direct_update_logged);
 END $$;
 
 WITH category_totals AS (
@@ -201,7 +205,7 @@ SELECT 12, 'Trail: no movement names an order that is missing',
        (SELECT movements_naming_a_missing_order FROM stock_trail_check)::text, '0',
        (SELECT movements_naming_a_missing_order FROM stock_trail_check) = 0
 UNION ALL
-SELECT 13, 'Order functions exist; stock write protections work',
+SELECT 13, 'Order functions exist; stock rule and audit trigger work',
        (SELECT count(*)
           FROM (VALUES
               (to_regprocedure('place_order(bigint,bigint,integer)')),
@@ -220,10 +224,10 @@ SELECT 13, 'Order functions exist; stock write protections work',
          || '; negative update blocked = '
          || (SELECT stock_guard_probe.negative_update_blocked::text
                FROM pg_temp.stock_guard_probe)
-         || '; direct update blocked = '
-         || (SELECT stock_guard_probe.direct_update_blocked::text
+         || '; direct update logged = '
+         || (SELECT stock_guard_probe.direct_update_logged::text
                FROM pg_temp.stock_guard_probe),
-       '3 functions; constraint NOT VALID = true; negative insert blocked = true; negative update blocked = true; direct update blocked = true',
+       '3 functions; constraint NOT VALID = true; negative insert blocked = true; negative update blocked = true; direct update logged = true',
        (SELECT count(*)
           FROM (VALUES
               (to_regprocedure('place_order(bigint,bigint,integer)')),
@@ -240,7 +244,7 @@ SELECT 13, 'Order functions exist; stock write protections work',
        )
        AND (SELECT stock_guard_probe.negative_insert_blocked
               AND stock_guard_probe.negative_update_blocked
-              AND stock_guard_probe.direct_update_blocked
+              AND stock_guard_probe.direct_update_logged
               FROM pg_temp.stock_guard_probe)
 ORDER BY check_number;
 \qecho

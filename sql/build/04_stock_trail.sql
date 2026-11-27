@@ -2,11 +2,13 @@
 
 -- WHAT THIS DOES
 --   Every change to stock leaves one row in inventory_log, written in the same
---   transaction as the change, so the two cannot disagree:
+--   transaction as the change, so the two cannot disagree. New products with
+--   opening stock are recorded, and direct stock updates are audited too:
 --     sale        place_order        (file 01)
 --     restock     restock_product    (this file)
 --     correction  correct_stock      (this file), or stock_take when the count
 --                                    matches the system
+--     manual_update                direct UPDATE of stock_quantity
 --   Two views let an auditor walk the trail and see what cannot be explained.
 
 -- DECISIONS
@@ -17,26 +19,67 @@
 --   C. A restock that would still leave a product below zero is refused with a
 --      clear message: count the shelf and use correct_stock first. The stock
 --      rule from file 01 would reject it anyway; this gives a clear reply.
---   D. No trigger. A trigger would also catch a hand-written UPDATE, but it
---      does not stop two buyers (only the lock does). A small guard trigger
---      now rejects direct stock edits; the three functions authorize their
---      own updates and continue to write the detailed movement rows.
+--   D. The trigger writes one movement row for every stock change. The three
+--      functions set the reason and order details for their update; other
+--      updates receive reason 'manual_update'. The row lock in place_order,
+--      not the trigger, prevents two buyers from overselling.
 
 -- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/04_stock_trail.sql
 
 \set QUIET on
 
 
-CREATE OR REPLACE FUNCTION guard_direct_product_stock_update()
+CREATE OR REPLACE FUNCTION log_product_stock_change()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
+DECLARE
+    v_reason           text;
+    v_note             text;
+    v_order_id         integer;
+    v_order_id_setting text;
 BEGIN
-    IF current_setting('kloudkart.stock_change_authorized', true) IS DISTINCT FROM 'on' THEN
-        RAISE EXCEPTION
-            'Direct stock updates are not allowed; use place_order, restock_product, or correct_stock'
-            USING ERRCODE = '42501';
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.stock_quantity IS NOT NULL AND NEW.stock_quantity <> 0 THEN
+            INSERT INTO inventory_log (product_id, change_qty, reason, created_at, note)
+            VALUES (NEW.product_id, NEW.stock_quantity, 'opening_balance', now(),
+                    'Initial stock on product creation');
+        END IF;
+
+        RETURN NEW;
     END IF;
+
+    v_reason := nullif(current_setting('kloudkart.stock_change_reason', true), '');
+
+    IF v_reason IS NULL
+       OR v_reason NOT IN ('sale', 'restock', 'correction', 'stock_take') THEN
+        v_reason := 'manual_update';
+        v_note := 'Direct stock update';
+    ELSE
+        v_note := nullif(current_setting('kloudkart.stock_change_note', true), '');
+
+        IF v_reason = 'sale' THEN
+            v_order_id_setting := nullif(
+                current_setting('kloudkart.stock_change_order_id', true), ''
+            );
+
+            IF v_order_id_setting ~ '^[0-9]+$' THEN
+                v_order_id := v_order_id_setting::integer;
+            END IF;
+        END IF;
+    END IF;
+
+    INSERT INTO inventory_log (
+        product_id, change_qty, reason, created_at, note, order_id
+    )
+    VALUES (
+        NEW.product_id,
+        coalesce(NEW.stock_quantity, 0) - coalesce(OLD.stock_quantity, 0),
+        v_reason,
+        now(),
+        v_note,
+        v_order_id
+    );
 
     RETURN NEW;
 END $$;
@@ -52,8 +95,9 @@ LANGUAGE plpgsql
 SET lock_timeout = '5s'
 AS $$
 DECLARE
-    v_stock                  integer;
-    v_stock_change_authorized text;
+    v_stock          integer;
+    v_previous_reason text;
+    v_previous_note   text;
 BEGIN
     IF p_quantity IS NULL OR p_quantity <= 0 THEN
         RETURN QUERY SELECT false, 'Quantity must be above zero'::text;
@@ -83,18 +127,17 @@ BEGIN
         RETURN;
     END IF;
 
-    v_stock_change_authorized := current_setting('kloudkart.stock_change_authorized', true);
-    PERFORM set_config('kloudkart.stock_change_authorized', 'on', true);
+    v_previous_reason := current_setting('kloudkart.stock_change_reason', true);
+    v_previous_note := current_setting('kloudkart.stock_change_note', true);
+    PERFORM set_config('kloudkart.stock_change_reason', 'restock', true);
+    PERFORM set_config('kloudkart.stock_change_note', coalesce(p_note, ''), true);
 
     UPDATE products
        SET stock_quantity = stock_quantity + p_quantity
      WHERE products.product_id = p_product_id;
 
-    PERFORM set_config('kloudkart.stock_change_authorized',
-                       coalesce(v_stock_change_authorized, ''), true);
-
-    INSERT INTO inventory_log (product_id, change_qty, reason, created_at, note)
-    VALUES (p_product_id, p_quantity, 'restock', now(), p_note);
+    PERFORM set_config('kloudkart.stock_change_reason', coalesce(v_previous_reason, ''), true);
+    PERFORM set_config('kloudkart.stock_change_note', coalesce(v_previous_note, ''), true);
 
     RETURN QUERY SELECT true, 'Restocked'::text;
 END $$;
@@ -110,8 +153,9 @@ LANGUAGE plpgsql
 SET lock_timeout = '5s'
 AS $$
 DECLARE
-    v_stock                  integer;
-    v_stock_change_authorized text;
+    v_stock           integer;
+    v_previous_reason text;
+    v_previous_note   text;
 BEGIN
     IF p_counted_quantity IS NULL OR p_counted_quantity < 0 THEN
         RETURN QUERY SELECT false, 'The counted quantity cannot be below zero'::text;
@@ -140,33 +184,39 @@ BEGIN
         RETURN;
     END IF;
 
-    v_stock_change_authorized := current_setting('kloudkart.stock_change_authorized', true);
-    PERFORM set_config('kloudkart.stock_change_authorized', 'on', true);
+    v_previous_reason := current_setting('kloudkart.stock_change_reason', true);
+    v_previous_note := current_setting('kloudkart.stock_change_note', true);
+    PERFORM set_config(
+        'kloudkart.stock_change_reason',
+        CASE WHEN p_counted_quantity = v_stock THEN 'stock_take' ELSE 'correction' END,
+        true
+    );
+    PERFORM set_config('kloudkart.stock_change_note', p_reason_for_change, true);
 
     UPDATE products
        SET stock_quantity = p_counted_quantity
      WHERE products.product_id = p_product_id;
 
-    PERFORM set_config('kloudkart.stock_change_authorized',
-                       coalesce(v_stock_change_authorized, ''), true);
-
-    INSERT INTO inventory_log (product_id, change_qty, reason, created_at, note)
-    VALUES (p_product_id,
-            p_counted_quantity - v_stock,
-            CASE WHEN p_counted_quantity = v_stock THEN 'stock_take' ELSE 'correction' END,
-            now(),
-            p_reason_for_change);
+    PERFORM set_config('kloudkart.stock_change_reason', coalesce(v_previous_reason, ''), true);
+    PERFORM set_config('kloudkart.stock_change_note', coalesce(v_previous_note, ''), true);
 
     RETURN QUERY SELECT true, 'Stock corrected'::text;
 END $$;
 
 
-DROP TRIGGER IF EXISTS products_stock_update_guard ON products;
-CREATE TRIGGER products_stock_update_guard
-    BEFORE UPDATE OF stock_quantity ON products
+DROP TRIGGER IF EXISTS products_stock_update_log ON products;
+CREATE TRIGGER products_stock_update_log
+    AFTER UPDATE OF stock_quantity ON products
     FOR EACH ROW
     WHEN (OLD.stock_quantity IS DISTINCT FROM NEW.stock_quantity)
-    EXECUTE FUNCTION guard_direct_product_stock_update();
+    EXECUTE FUNCTION log_product_stock_change();
+
+DROP TRIGGER IF EXISTS products_stock_insert_log ON products;
+CREATE TRIGGER products_stock_insert_log
+    AFTER INSERT ON products
+    FOR EACH ROW
+    WHEN (NEW.stock_quantity IS NOT NULL AND NEW.stock_quantity <> 0)
+    EXECUTE FUNCTION log_product_stock_change();
 
 
 -- Every movement with its product and, for sales made since file 01, its order.
