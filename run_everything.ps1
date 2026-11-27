@@ -123,12 +123,27 @@ for ($run = 1; $run -le 3; $run++) {
 
     $passed = @($lines | Where-Object { $_ -cmatch '^PASSED' }).Count -gt 0
     $bad = @($lines | Where-Object { $_ -cmatch 'FAIL|Traceback|ERROR' -or $_ -match '\b[1-9]\d* errored' })
+    $elapsedMatch = [regex]::Match(($lines -join "`n"), 'wall clock ([0-9]+(?:\.[0-9]+)?)s')
+    $withinTimeLimit = $false
+    if ($elapsedMatch.Success) {
+        $elapsedSeconds = [double]::Parse($elapsedMatch.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+        $withinTimeLimit = $elapsedSeconds -le 10
+    }
 
-    if ($code -eq 0 -and $passed -and $bad.Count -eq 0) {
-        Write-Log 'OK' "05_race_run$run" "PASSED (full report: $raceReport)"
+    if ($code -eq 0 -and $passed -and $bad.Count -eq 0 -and $withinTimeLimit) {
+        Write-Log 'OK' "05_race_run$run" "PASSED in $elapsedSeconds seconds (10-second limit; full report: $raceReport)"
     }
     else {
-        Fail "05_race_run$run" "race test did not pass cleanly (full report: $raceReport)" $lines
+        $reason = if (-not $elapsedMatch.Success) {
+            '400-buyer wall-clock time was not reported'
+        }
+        elseif (-not $withinTimeLimit) {
+            "400-buyer test took $elapsedSeconds seconds, over the 10-second limit"
+        }
+        else {
+            'race test did not pass cleanly'
+        }
+        Fail "05_race_run$run" "$reason (full report: $raceReport)" $lines
     }
 }
 

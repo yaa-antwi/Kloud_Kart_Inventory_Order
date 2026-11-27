@@ -92,12 +92,28 @@ for ($run = 1; $run -le 3; $run++) {
     Add-ReportSection "Race test run $run" $raceCommand $raceCode $raceOutput
 
     $passed = @($raceOutput | Where-Object { $_ -cmatch '^PASSED' }).Count -gt 0
-    if ($raceCode -ne 0 -or -not $passed) {
+    $elapsedMatch = [regex]::Match(($raceOutput -join "`n"), 'wall clock ([0-9]+(?:\.[0-9]+)?)s')
+    $withinTimeLimit = $false
+    if ($elapsedMatch.Success) {
+        $elapsedSeconds = [double]::Parse($elapsedMatch.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+        $withinTimeLimit = $elapsedSeconds -le 10
+    }
+
+    if ($raceCode -ne 0 -or -not $passed -or -not $withinTimeLimit) {
         $script:failures++
-        Add-Content -Encoding utf8 -Path $reportPath -Value "Race test run $run failed."
+        $reason = if (-not $elapsedMatch.Success) {
+            'the 400-buyer wall-clock time was not reported'
+        }
+        elseif (-not $withinTimeLimit) {
+            "the 400-buyer test took $elapsedSeconds seconds, over the 10-second limit"
+        }
+        else {
+            'the race test did not pass'
+        }
+        Add-Content -Encoding utf8 -Path $reportPath -Value "Race test run $run failed: $reason."
     }
     else {
-        Add-Content -Encoding utf8 -Path $reportPath -Value "Race test run $run passed."
+        Add-Content -Encoding utf8 -Path $reportPath -Value "Race test run $run passed in $elapsedSeconds seconds (10-second limit)."
     }
 
     $legacyReport = Join-Path $PSScriptRoot "sql\build_outputs\03_race_test_run$run.md"

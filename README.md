@@ -190,7 +190,7 @@ Run the test three times and save each result:
 
 The test creates competing purchase attempts to check that stock is not oversold.
 
-Each of the three files should end with a line starting `PASSED`, and Test 2 should show `50 sold, 350 refused, 0 errored`.
+Each of the three files should end with a line starting `PASSED`, and Test 2 should show `50 sold, 350 refused, 0 errored` in no more than 10 seconds. The automated test runners enforce that time limit.
 
 - `50 sold` means 50 purchase attempts succeeded.
 - `350 refused` means 350 attempts were rejected because the available stock was no longer sufficient.
