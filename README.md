@@ -1,38 +1,47 @@
+
 # Kloud Kart Inventory and Order Management
 
-This project fixes two problems for Kloud Kart's operations manager, Nana. The company sold the same last unit twice, and the Monday customer-spending report is slow. It also adds a low-stock view, a stock movement trail, and one improvement beyond the brief. Everything runs on the existing database with no new tools.
+This project addresses two problems at Kloud Kart:
+
+- The company sold the same last unit to two customers.
+- The Monday customer-spending report takes too long to produce.
+
+It also provides a low-stock view, a record of stock movements, and one additional improvement. The solution uses Kloud Kart's existing PostgreSQL database and does not require new software tools.
 
 ## The project in plain words
 
-1. **Looked at the data first.** Found nine problems and ranked them by danger (`docs/data_findings.md`).
-2. **Stopped the overselling.** A new "place an order" step makes buyers take turns on a product. Two buyers racing for the last unit: one gets it, the other hears "Out of stock".
-3. **Made the Monday report fast.** The report is now worked out for every customer in one pass, in about a second.
-4. **Built the low-stock view.** It follows the category tree to any depth.
-5. **Built the stock trail.** Every new sale, restock and correction leaves a record.
-6. **Added one extra.** One command writes Adwoa's report as four spreadsheet files.
-7. **Wrote it up.** Five decision records, a one-page memo to Nana, and the improvement note.
+1. **Investigated the data.** Identified nine data problems and ranked them by severity. See `docs/data_findings.md`.
+2. **Prevented overselling.** Added a `place_order` function that controls access to stock. When two customers compete for the last unit, one order succeeds and the other is refused with an out-of-stock message.
+3. **Improved the Monday report.** Changed the report calculation so customer spending is calculated in one pass. The new report takes about one second in the measured test.
+4. **Added a low-stock view.** The view follows the product category structure, including categories nested at different levels.
+5. **Added a stock movement trail.** New sales, restocks and corrections can leave records showing how stock changed.
+6. **Added a report export.** One command produces four CSV files for Adwoa's Monday report.
+7. **Documented the decisions.** Added five decision records, a one-page memo to Nana, and an improvement note.
 
 ## Project structure
 
 ```text
 Kloud_Kart_Inventory_Order/
 ├── README.md
+├── .env                         # Local database connection settings
+├── .gitignore
+├── run_build.ps1
+├── run_tests.ps1
+├── run_monday_report.ps1
 ├── M03_Resources/
-│   ├── data/                         # Six source CSV files
+│   ├── data/                    # Six source CSV files
 │   ├── load.sql
-│   ├── race_test.py                  # Supplied concurrency test
+│   ├── race_test.py              # Supplied concurrency test
 │   └── schema.sql
 ├── docs/
-│   ├── decisions/                    # ADR-001 through ADR-005
+│   ├── decisions/                # ADR-001 through ADR-005
 │   ├── client_memo.md
 │   ├── data_findings.md
 │   └── improvement.md
-├── logs/                             # Captured command/test run reports
-├── report_pack/                      # Four generated Monday report CSV files
-├── tests/                            # SQL checks and historical race-test reports
-│   ├── 99_checks.sql
-│   ├── race_test.py                  # Duplicate of M03_Resources/race_test.py
-│   └── 03_race_test_run*.md           # Historical test reports
+├── logs/                         # Captured command and test reports
+├── report_pack/                  # Four generated Monday report CSV files
+├── tests/
+│   └── 99_checks.sql              # SQL validation checks
 └── sql/
     ├── build/
     │   ├── 01_place_order.sql
@@ -41,208 +50,278 @@ Kloud_Kart_Inventory_Order/
     │   ├── 04_stock_trail.sql
     │   ├── 05_report_pack.sql
     │   └── run_all.sql
-    ├── build_outputs/                # Generated build and check results
-    ├── diagnosis/                    # SQL used to investigate source data
-    ├── diagnosis_outputs/            # Results from diagnosis queries
+    ├── build_outputs/             # Generated build and check results
+    ├── diagnosis/                 # SQL used to investigate source data
+    ├── diagnosis_outputs/         # Results from diagnosis queries
     └── report/
         └── 01_before_after.sql
 ```
 
-For methodology, severity-ranked findings, and caveats, see [`docs/data_findings.md`](docs/data_findings.md).
+For the investigation methods, ranked findings and limitations, see [`docs/data_findings.md`](docs/data_findings.md).
 
-The SQL checks are in `tests/99_checks.sql`; the concurrency test is
-`M03_Resources/race_test.py`. `tests/race_test.py` is an exact duplicate of the
-supplied concurrency test, not a separate test. The Markdown race-test reports
-in `tests/` are historical results; new reports are written to `logs/` and
-`sql/build_outputs/`.
+The SQL validation checks are in `tests/99_checks.sql`. The supplied concurrency test is `M03_Resources/race_test.py`. It is the test used to check whether competing orders can oversell stock. Do not edit this supplied test.
+
+Older race-test copies and reports may remain in the project history. The current test runner uses the supplied test in `M03_Resources/` and saves new run results in `logs/`.
 
 ## What each build file does
 
-| File | Does |
+| File | Purpose |
 |---|---|
-| `01_place_order.sql` | The order step, the automatic numbering, and the rule against new negative stock |
-| `02_low_stock.sql` | The category tree and the low-stock view |
-| `03_monday_report.sql` | The Monday report views (summary, top 100, 12 months with running total, notes) |
-| `04_stock_trail.sql` | Restock and correction steps, and the stock movement trail and check |
-| `05_report_pack.sql` | Writes the four report files (the improvement) |
-| `run_all.sql` | Runs files 01 to 04 in order and writes the build summary |
+| `01_place_order.sql` | Creates the order-placement function, automatic order numbering and protection against new negative stock. |
+| `02_low_stock.sql` | Builds the category hierarchy and low-stock view. |
+| `03_monday_report.sql` | Creates the Monday report views: customer summary, top 100 customers, 12-month spending with a running total, and report notes. |
+| `04_stock_trail.sql` | Adds restock and correction functions, the stock movement trail and its check. |
+| `05_report_pack.sql` | Exports the four report files. |
+| `run_all.sql` | Runs build files 01 to 04 in order and writes a build summary. |
 
 ## Test files
 
-| File | Does |
+| File | Purpose |
 |---|---|
-| `tests/99_checks.sql` | Runs 13 SQL checks and writes `sql/build_outputs/02_checks.md` |
-| `M03_Resources/race_test.py` | Tests order placement under concurrency |
+| `tests/99_checks.sql` | Runs 13 SQL checks and writes `sql/build_outputs/02_checks.md`. |
+| `M03_Resources/race_test.py` | Tests order placement when many buyers attempt to purchase stock at the same time. |
 
-## How to run it
+## How to run the project
 
-**Before you start**
+### Before you start
 
-1. Install Docker Desktop and Python on your computer.
-2. Download the project from GitHub by cloning the repository, or download and extract the repository ZIP file.
-3. Open the project folder you downloaded.
-4. Open PowerShell inside that folder. To do this in Windows File Explorer, open the project folder, click the address bar, type `powershell`, and press Enter.
-5. Make sure Docker Desktop is open and shows that the engine is running.
+1. Install Docker Desktop and Python.
+2. Clone the GitHub repository or download and extract its ZIP file.
+3. Open the project folder.
+4. Open PowerShell inside that folder. In Windows File Explorer, open the project folder, click the address bar, type `powershell`, and press Enter.
+5. Make sure Docker Desktop is running.
 
-Run the commands below in PowerShell, one step at a time. You must be inside the project folder when you run them.
+Run the commands below from the project root, one step at a time.
 
-**Step 1: Start the database (first time only)**
+### Step 1: Set up the database container
 
-If you are creating the database container for the first time, run:
+**First-time setup**
+
+If you do not already have a PostgreSQL container named `kloudkart`, create one:
 
 ```powershell
-docker run -d --name kloudkart -e POSTGRES_PASSWORD=kloudkart -p 5432:5432 -v "${PWD}:/lab" postgres:18 -c max_connections=500
+docker run -d --name kloudkart -e POSTGRES_PASSWORD=your_local_password -p 5432:5432 -v "${PWD}:/lab" postgres:18 -c max_connections=500
 ```
 
-The 500 connections matter, because the test opens 400 at once.
+Replace `your_local_password` with the local password you intend to use. Use the same password in your `.env` file.
 
-If the container already exists, use:
+The container is configured for up to 500 database connections because the concurrency test opens 400 connections.
+
+**If the container already exists**
+
+Start it instead:
 
 ```powershell
 docker start kloudkart
 ```
 
-Then run:
+Check its status:
 
 ```powershell
 docker ps -a
 ```
 
-Check that the status says "Up".
+The container should show `Up`.
 
-**Step 2: Load a fresh copy of the data**
+The password used when the container was first created remains its database password. Changing the value in `.env` does not change the password inside an existing container.
+
+### Step 2: Create the `.env` file
+
+Create a file named `.env` in the project root, alongside `README.md`.
+
+Add these two settings:
+
+```dotenv
+DATABASE_URL=postgresql://postgres:your_local_password@localhost:5432/postgres
+POSTGRES_PASSWORD=your_local_password
+```
+
+Replace `your_local_password` with the password used when the database container was created.
+
+- `DATABASE_URL` tells the Python concurrency test how to connect to PostgreSQL.
+- `POSTGRES_PASSWORD` records the password used for the initial container setup.
+
+Keep `.env` out of Git. The `.gitignore` file should contain:
+
+```gitignore
+# Local credentials
+.env
+
+# Generated outputs
+logs/
+sql/build_outputs/
+sql/diagnosis_outputs/
+report_pack/
+
+# Python
+__pycache__/
+*.pyc
+```
+
+The `.env` file is not encrypted. Do not share it or commit it to GitHub.
+
+### Step 3: Load a fresh copy of the data
+
+The following commands reset the database schema and reload the supplied data.
+
+**Warning:** The first command deletes everything currently stored in the `public` schema. Use it only when you intend to reset the project database.
 
 ```powershell
 docker exec -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 ```
 
+Load the schema:
+
 ```powershell
 docker exec -w /lab/M03_Resources -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f schema.sql
 ```
+
+Load the CSV data:
 
 ```powershell
 docker exec -w /lab/M03_Resources -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f load.sql
 ```
 
-Expect six row counts at the end: 94, 4023, 40420, 159384, 336559 and 282352 (in that table order: categories, products, customers, orders, order items, inventory log).
+Expect these six row counts, in this order:
 
-The first command deletes everything in the database, so it is also the reset button.
+| Table | Expected rows |
+|---|---:|
+| Categories | 94 |
+| Products | 4,023 |
+| Customers | 40,420 |
+| Orders | 159,384 |
+| Order items | 336,559 |
+| Inventory log | 282,352 |
 
-**Step 3: Make the output folders**
+### Step 4: Create the output folders
 
 ```powershell
-New-Item -ItemType Directory -Force sql\build_outputs, sql\report, report_pack | Out-Null
+New-Item -ItemType Directory -Force sql\build_outputs, sql\report, report_pack, logs | Out-Null
 ```
 
-**Step 4: Build everything**
+### Step 5: Build the SQL solution
 
 ```powershell
 docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/run_all.sql
 ```
 
-Expect only notices (lines saying "skipping"). A line starting with `ERROR` is a problem.
+The build should complete without errors. Notices about existing objects being skipped are expected where the scripts use that behaviour.
 
-This writes `sql\build_outputs\01_build_summary.md`.
+The build writes:
 
-**Step 5: Run the 13 checks**
+`sql/build_outputs/01_build_summary.md`
+
+### Step 6: Run the SQL checks
 
 ```powershell
 docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f tests/99_checks.sql
 ```
 
-This writes `02_checks.md`. Every row with a result should say `t` (true).
+This runs the 13 SQL validation checks and writes:
 
-**Step 6: Run the race test three times**
+`sql/build_outputs/02_checks.md`
 
-Install the Python package needed to connect to the database:
+Every check that reports a true/false result should show `t` for true.
+
+### Step 7: Run the concurrency test
+
+Install the Python package required to connect to PostgreSQL:
 
 ```powershell
 pip install psycopg2-binary
 ```
 
-Set the database connection details:
+The `.env` file supplies the database connection details. The `run_tests.ps1` script loads those settings before running the concurrency test.
+
+To run the SQL checks and concurrency test three times, use:
 
 ```powershell
-$env:DATABASE_URL="postgresql://postgres:kloudkart@localhost:5432/postgres"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
 
-This tells Python how to connect to the PostgreSQL database running on your computer. The setting applies to programs started from the current PowerShell session.
+The script saves a detailed test report in `logs/`.
 
-Set the text encoding:
+The concurrency test checks whether the database can safely handle competing purchase attempts.
 
-```powershell
-$env:PYTHONIOENCODING="utf-8"
-```
+For the 400-buyer test, the expected result is:
 
-This tells Python to use UTF-8 when reading and writing text through its input and output streams.
+- **50 sold:** 50 orders succeed because only 50 units are available.
+- **350 refused:** The remaining attempts are rejected because stock is no longer available.
+- **0 errored:** No unexpected errors occur.
+- **Within 10 seconds:** The test completes within the required time limit.
 
-```powershell
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-```
+The test also checks repeated attempts to buy the last unit, insufficient-stock requests and stock movement records.
 
-This tells PowerShell to use UTF-8 when handling text output.
+The supplied test cleans up after itself. Do not edit `M03_Resources/race_test.py`.
 
-Run the test three times and save each result:
-
-```powershell
-1..3 | ForEach-Object { $run = $_; $lines = python M03_Resources\race_test.py --verbose 2>&1 | ForEach-Object { "$_" }; Set-Content -Encoding utf8 -Path "sql\build_outputs\03_race_test_run$run.md" -Value (@("# Race test, run $run", "", "Written: $(Get-Date -Format 'yyyy-MM-dd HH:mm')", "", '```text') + $lines + '```') }
-```
-
-The test creates competing purchase attempts to check that stock is not oversold.
-
-Each of the three files should end with a line starting `PASSED`, and Test 2 should show `50 sold, 350 refused, 0 errored` in no more than 10 seconds. The automated test runners enforce that time limit.
-
-- `50 sold` means 50 purchase attempts succeeded.
-- `350 refused` means 350 attempts were rejected because the available stock was no longer sufficient.
-- `0 errored` means no attempts failed with unexpected errors.
-
-The three saved files provide evidence that the test was repeated and that the results were recorded. The test cleans up after itself. Do not edit `race_test.py`.
-
-**Step 7: Run the before-and-after speed comparison**
+### Step 8: Run the before-and-after speed comparison
 
 ```powershell
 docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/report/01_before_after.sql
 ```
 
-About 20 seconds. It writes `04_before_after.md` and leaves no data behind.
+This comparison takes about 20 seconds in the measured run. It writes:
 
-**Step 8: Write the four report files (the improvement)**
+`sql/build_outputs/04_before_after.md`
+
+It is designed to leave no test data behind.
+
+### Step 9: Generate the four report files
 
 ```powershell
 docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/05_report_pack.sql
 ```
 
-Expect `COPY 100`, `COPY 40420`, `COPY 485040` and `COPY 1`. The files appear in `report_pack\`.
+The expected output includes:
 
-## Automated runs
+```text
+COPY 100
+COPY 40420
+COPY 485040
+COPY 1
+```
 
-Run these commands from PowerShell in the project root:
+The four CSV files are written to `report_pack/`.
 
-| Script | Command | What it runs | Logs and outputs |
+## Automated scripts
+
+Run these commands from PowerShell in the project root.
+
+| Script | Command | What it does | Output |
 |---|---|---|---|
-| `run_build.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_build.ps1` | Runs `sql/build/run_all.sql` against the existing database. It does not reset or reload data, or run tests. | Saves command output to `logs/build_run_<timestamp>.md`; the SQL script also writes `sql/build_outputs/01_build_summary.md`. |
-| `run_tests.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1` | Runs the 13 SQL checks and the race-test suite three times. It does not reset or reload data. | Saves detailed results to `logs/test_run_<timestamp>.md`. |
-| `run_monday_report.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_monday_report.ps1` | Generates the four Monday report files. | Writes four CSVs to `report_pack/` and records the run in `logs/monday_report_log.md`. |
+| `run_build.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_build.ps1` | Runs the SQL build against the existing database. It does not reset or reload data or run tests. | Saves a command report in `logs/` and a build summary in `sql/build_outputs/`. |
+| `run_tests.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1` | Runs the 13 SQL checks and the concurrency test three times. It does not reset or reload data. | Saves detailed results in `logs/`. |
+| `run_monday_report.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_monday_report.ps1` | Generates the four Monday report CSV files. | Writes the CSV files to `report_pack/` and records the run in `logs/monday_report_log.md`. |
 
-## To try a single order by hand
+The automated scripts use the existing database. If you need a clean starting point, follow Step 3 to reload the data before running them.
+
+## Trying a single order manually
+
+The following command places a real order:
 
 ```powershell
 docker exec -i kloudkart psql -U postgres -c "SELECT * FROM place_order(100001, 5001, 1);"
 ```
 
-This makes a real sale. Run Step 2 again afterwards to get back to a clean load.
+It uses customer `100001`, product `5001` and a quantity of one.
+
+This changes the database. To return to the original supplied data, follow Step 3 and reload the database.
 
 ## What the project does not do
 
-- A stock number typed in by hand skips the order step and leaves no history row.
-- The 14 negative stock counts and the 144 stock-history differences are not corrected. Only a shelf count can settle them.
-- The report pack is a one-command run. It is not scheduled.
-- I never saw Adwoa's real report, so her 40 minutes is untested. The slow "before" is a rebuild of the likely shape.
-- What the website shows a customer, and which clock the dates use, are unverified.
-- Some checks (the strict-setting test, the 120-level category chain) ran only on a practice copy of an older database version.
+- Manually changing a product's stock quantity bypasses the order-placement process and does not create a stock movement history record.
+- The 14 negative stock counts and 144 stock-history differences found during the investigation have not been corrected. A physical stock count is needed to establish the correct quantities.
+- The four-file report export runs on demand. It is not scheduled.
+- Adwoa's actual report was not available for testing. The reported 40-minute duration has not been independently verified; the before-and-after comparison uses a reconstruction of the likely report calculation.
+- The exact information displayed to customers on the website and the time zone used for date fields have not been verified.
+- The strict-setting test and the 120-level category-chain test were run on an older practice copy of the database, not the final shipped database version.
 
-## Note on the evidence files
+## Notes on the test evidence
 
-Two additional orders (665625 and 665626) were created during testing of the 5-second wait limit. They were created after the saved check results, so they are not included in those earlier results.
+Two additional orders, `665625` and `665626`, were created while testing the five-second lock-wait limit. They were created after the saved SQL check results, so those earlier results do not include them.
 
-The 5-second lock limit and the response to a lock timeout are implemented in `sql/build/01_place_order.sql`, under the `place_order` function. You can review this file to see how the limit is enforced.
+The five-second lock-wait limit and the response to a lock timeout are implemented in the `place_order` function in:
+
+`sql/build/01_place_order.sql`
+
+Review that file to see how the limit is enforced.
