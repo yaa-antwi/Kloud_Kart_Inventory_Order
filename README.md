@@ -28,6 +28,11 @@ Kloud_Kart_Inventory_Order/
 │   ├── data_findings.md
 │   └── improvement.md
 ├── logs/                             # Captured command/test run reports
+├── report_pack/                      # Four generated Monday report CSV files
+├── tests/                            # SQL checks and historical race-test reports
+│   ├── 99_checks.sql
+│   ├── race_test.py                  # Duplicate of M03_Resources/race_test.py
+│   └── 03_race_test_run*.md           # Historical test reports
 └── sql/
     ├── build/
     │   ├── 01_place_order.sql
@@ -35,24 +40,21 @@ Kloud_Kart_Inventory_Order/
     │   ├── 03_monday_report.sql
     │   ├── 04_stock_trail.sql
     │   ├── 05_report_pack.sql
-    │   ├── 99_checks.sql             # SQL assertions
     │   └── run_all.sql
-    ├── build_outputs/                # Generated build, check and test results
-    ├── diagnosis/                    # SQL used to investigate the source data
-    ├── diagnosis_outputs/             # Findings from the diagnosis queries
-    ├── report/
-    │   └── 01_before_after.sql
-    └── tests/                        # Historical test reports and duplicate copies
+    ├── build_outputs/                # Generated build and check results
+    ├── diagnosis/                    # SQL used to investigate source data
+    ├── diagnosis_outputs/            # Results from diagnosis queries
+    └── report/
+        └── 01_before_after.sql
 ```
 
 For methodology, severity-ranked findings, and caveats, see [`docs/data_findings.md`](docs/data_findings.md).
 
-The canonical test sources are `sql/build/99_checks.sql` and
-`M03_Resources/race_test.py`. The files `sql/tests/01_place_order.sql` and
-`sql/tests/race_test.py` are exact copies of the build script and supplied test,
-respectively; they are not separate tests. The Markdown race-test reports in
-`sql/tests/` are earlier run results, while current generated results go in
-`sql/build_outputs/` or `logs/`.
+The SQL checks are in `tests/99_checks.sql`; the concurrency test is
+`M03_Resources/race_test.py`. `tests/race_test.py` is an exact duplicate of the
+supplied concurrency test, not a separate test. The Markdown race-test reports
+in `tests/` are historical results; new reports are written to `logs/` and
+`sql/build_outputs/`.
 
 ## What each build file does
 
@@ -64,7 +66,13 @@ respectively; they are not separate tests. The Markdown race-test reports in
 | `04_stock_trail.sql` | Restock and correction steps, and the stock movement trail and check |
 | `05_report_pack.sql` | Writes the four report files (the improvement) |
 | `run_all.sql` | Runs files 01 to 04 in order and writes the build summary |
-| `99_checks.sql` | 13 checks, one row each, written to `02_checks.md` |
+
+## Test files
+
+| File | Does |
+|---|---|
+| `tests/99_checks.sql` | Runs 13 SQL checks and writes `sql/build_outputs/02_checks.md` |
+| `M03_Resources/race_test.py` | Tests order placement under concurrency |
 
 ## How to run it
 
@@ -123,7 +131,7 @@ The first command deletes everything in the database, so it is also the reset bu
 **Step 3: Make the output folders**
 
 ```powershell
-New-Item -ItemType Directory -Force sql\build_outputs, sql\report, sql\report_pack | Out-Null
+New-Item -ItemType Directory -Force sql\build_outputs, sql\report, report_pack | Out-Null
 ```
 
 **Step 4: Build everything**
@@ -139,7 +147,7 @@ This writes `sql\build_outputs\01_build_summary.md`.
 **Step 5: Run the 13 checks**
 
 ```powershell
-docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/99_checks.sql
+docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f tests/99_checks.sql
 ```
 
 This writes `02_checks.md`. Every row with a result should say `t` (true).
@@ -204,7 +212,7 @@ About 20 seconds. It writes `04_before_after.md` and leaves no data behind.
 docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/05_report_pack.sql
 ```
 
-Expect `COPY 100`, `COPY 40420`, `COPY 485040` and `COPY 1`. The files appear in `sql\report_pack`.
+Expect `COPY 100`, `COPY 40420`, `COPY 485040` and `COPY 1`. The files appear in `report_pack\`.
 
 ## Automated runs
 
@@ -214,7 +222,7 @@ Run these commands from PowerShell in the project root:
 |---|---|---|---|
 | `run_build.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_build.ps1` | Runs `sql/build/run_all.sql` against the existing database. It does not reset or reload data, or run tests. | Saves command output to `logs/build_run_<timestamp>.md`; the SQL script also writes `sql/build_outputs/01_build_summary.md`. |
 | `run_tests.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1` | Runs the 13 SQL checks and the race-test suite three times. It does not reset or reload data. | Saves detailed results to `logs/test_run_<timestamp>.md`. |
-| `run_monday_report.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_monday_report.ps1` | Generates the four Monday report files. | Writes four CSVs to `sql/report_pack/` and records the run in `logs/monday_report_log.md`. |
+| `run_monday_report.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_monday_report.ps1` | Generates the four Monday report files. | Writes four CSVs to `report_pack/` and records the run in `logs/monday_report_log.md`. |
 
 ## To try a single order by hand
 

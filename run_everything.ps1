@@ -13,7 +13,7 @@ Set-Location $PSScriptRoot
 $logDir  = Join-Path $PSScriptRoot 'logs'
 $failDir = Join-Path $logDir 'failures'
 
-New-Item -ItemType Directory -Force $logDir, $failDir, 'sql\build_outputs', 'sql\report', 'sql\report_pack' | Out-Null
+New-Item -ItemType Directory -Force $logDir, $failDir, 'sql\build_outputs', 'sql\report', 'report_pack' | Out-Null
 
 $runLog = Join-Path $logDir 'run_log.md'
 
@@ -85,7 +85,7 @@ if (-not (Run-Sql '02_load' '/lab/M03_Resources' 'load.sql')) { exit 1 }
 if (-not (Run-Sql '03_build' '/lab' 'sql/build/run_all.sql')) { exit 1 }
 
 # 4. Checks
-if (Run-Sql '04_checks' '/lab' 'sql/build/99_checks.sql') {
+if (Run-Sql '04_checks' '/lab' 'tests/99_checks.sql') {
 
     $checkFile = 'sql\build_outputs\02_checks.md'
 

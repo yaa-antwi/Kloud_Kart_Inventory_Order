@@ -6,7 +6,7 @@ Written by sql/build/run_all.sql. Every table below should show the loaded row c
 ```text
                                                  postgresql_version                                                 |     written_at      
 --------------------------------------------------------------------------------------------------------------------+---------------------
- PostgreSQL 18.7 (Debian 18.7-1.pgdg13+5) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit | 2026-11-27 14:07:25
+ PostgreSQL 18.7 (Debian 18.7-1.pgdg13+5) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit | 2026-11-27 15:06:04
 (1 row)
 
 ```

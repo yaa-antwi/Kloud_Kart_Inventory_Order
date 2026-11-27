@@ -1,5 +1,5 @@
 -- CHECKS: one row per check. Every row with a passed column should say t.
--- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/99_checks.sql
+-- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f tests/99_checks.sql
 -- The results are written to sql/build_outputs/02_checks.md (the folder must exist).
 
 \set QUIET on

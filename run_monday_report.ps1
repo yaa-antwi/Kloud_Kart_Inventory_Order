@@ -1,6 +1,6 @@
 
 # run_monday_report.ps1
-# For Adwoa. Writes the four Monday report files into sql\report_pack.
+# For Adwoa. Writes the four Monday report files into report_pack.
 # Every run adds one line to logs\monday_report_log.md.
 # If a run fails, the log opens in Notepad.
 #
@@ -9,7 +9,7 @@
 
 Set-Location $PSScriptRoot
 
-New-Item -ItemType Directory -Force 'logs', 'sql\report_pack' | Out-Null
+New-Item -ItemType Directory -Force 'logs', 'report_pack' | Out-Null
 $log = Join-Path $PSScriptRoot 'logs\monday_report_log.md'
 
 function Say($status, $message) {
@@ -59,7 +59,7 @@ if ($copies -notmatch '^COPY 100, COPY \d+, COPY \d+, COPY 1$') {
 }
 
 # 4. Record success
-Say 'OK' "Four files written to sql\report_pack ($copies)"
+Say 'OK' "Four files written to report_pack ($copies)"
 
-Write-Host 'Done. Your files are in sql\report_pack.'
+Write-Host 'Done. Your files are in report_pack.'
 Write-Host 'The log is logs\monday_report_log.md'

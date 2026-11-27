@@ -1,6 +1,6 @@
 @echo off
 setlocal
-rem Writes the four Monday report files into sql\report_pack. Double-click to run.
+rem Writes the four Monday report files into report_pack. Double-click to run.
 cd /d "%~dp0"
 
 set "DOCKER=docker"
@@ -20,9 +20,9 @@ if errorlevel 1 (
   goto :failed
 )
 
-if not exist "sql\report_pack\" mkdir "sql\report_pack"
+if not exist "report_pack\" mkdir "report_pack"
 if errorlevel 1 (
-  echo Could not create the sql\report_pack folder.
+  echo Could not create the report_pack folder.
   goto :failed
 )
 
@@ -40,15 +40,15 @@ if errorlevel 1 (
 )
 
 for %%F in (monday_top_100.csv monday_customer_summary.csv monday_monthly_running_total.csv monday_notes.csv) do (
-  if not exist "sql\report_pack\%%F" (
-    echo Expected report file was not created: sql\report_pack\%%F
+  if not exist "report_pack\%%F" (
+    echo Expected report file was not created: report_pack\%%F
     goto :failed
   )
 )
 
 echo.
 echo Done. The four report files are in:
-echo %CD%\sql\report_pack
+echo %CD%\report_pack
 goto :finish
 
 :failed

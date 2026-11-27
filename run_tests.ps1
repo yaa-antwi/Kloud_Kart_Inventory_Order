@@ -63,8 +63,8 @@ if ($startCode -ne 0) {
 
 Start-Sleep -Seconds 5
 
-$checksCommand = 'docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/99_checks.sql'
-$checksOutput = @(docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/99_checks.sql 2>&1 | ForEach-Object { "$_" })
+$checksCommand = 'docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f tests/99_checks.sql'
+$checksOutput = @(docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f tests/99_checks.sql 2>&1 | ForEach-Object { "$_" })
 $checksCode = $LASTEXITCODE
 Add-ReportSection 'SQL checks' $checksCommand $checksCode $checksOutput
 
