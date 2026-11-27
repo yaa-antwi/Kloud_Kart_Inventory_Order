@@ -12,23 +12,6 @@ This project fixes two problems for Kloud Kart's operations manager, Nana. The c
 6. **Added one extra.** One command writes Adwoa's report as four spreadsheet files.
 7. **Wrote it up.** Five decision records, a one-page memo to Nana, and the improvement note.
 
-## Data reconciliation
-
-| Stage | Rows | Delta | Reason |
-|---|---|---|---|
-| Orders missing customers | 210 | 665,181 | Missing customer records |
-| Items missing orders | 692 | 826,328 | Missing order records |
-| Inventory records missing products | 120 | — | Missing product records |
-| Products missing from category report | 43 | — | Missing or unreachable categories |
-| Order total mismatches | 2,398 | -3,477,551.62 net | Order totals differ from item totals |
-| Negative stock | 14 products | -27 units | Stock below zero |
-| Stock/history differences | 144 products | 2,553 absolute units | Stock does not match recorded movements |
-| Future-dated orders | 16 on the day of diagnosis; 15 on 27 November 2026 | — | Dates after the day the check was run. One order's date has passed since. |
-| Missing/zero item prices | 300 rows | 298 orders | Missing or zero prices |
-| Shared customer emails | 533 groups | 535 extra rows | Possible duplicate customers |
-
-For methodology, severity-ranked findings, and caveats, see [`docs/data_findings.md`](docs/data_findings.md).
-
 ## Project structure
 
 ```text
@@ -62,6 +45,8 @@ Kloud_Kart_Inventory_Order/
     └── tests/                        # Historical test reports and duplicate copies
 ```
 
+For methodology, severity-ranked findings, and caveats, see [`docs/data_findings.md`](docs/data_findings.md).
+
 The canonical test sources are `sql/build/99_checks.sql` and
 `M03_Resources/race_test.py`. The files `sql/tests/01_place_order.sql` and
 `sql/tests/race_test.py` are exact copies of the build script and supplied test,
@@ -80,8 +65,6 @@ respectively; they are not separate tests. The Markdown race-test reports in
 | `05_report_pack.sql` | Writes the four report files (the improvement) |
 | `run_all.sql` | Runs files 01 to 04 in order and writes the build summary |
 | `99_checks.sql` | 13 checks, one row each, written to `02_checks.md` |
-
-## How to run it
 
 ## How to run it
 
@@ -225,18 +208,13 @@ Expect `COPY 100`, `COPY 40420`, `COPY 485040` and `COPY 1`. The files appear in
 
 ## Automated runs
 
-Run these commands from PowerShell in the project root. The full clean workflow
-is the sequence in Steps 2–8 above; there is no single full-workflow runner
-script in the current project.
+Run these commands from PowerShell in the project root:
 
-| Run | Command | What it does | Results |
+| Script | Command | What it runs | Logs and outputs |
 |---|---|---|---|
-| Build SQL objects | `docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/run_all.sql` | Creates or replaces the order, low-stock, report and stock-trail objects. | `sql/build_outputs/01_build_summary.md` |
-| Run the 13 SQL checks | `docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/99_checks.sql` | Checks the built views, report totals and stock trail. | `sql/build_outputs/02_checks.md` |
-| Run the concurrency suite | `python M03_Resources\race_test.py --verbose` | Runs all four race-test scenarios once. Repeat three times for the recorded three-run evidence. | Terminal output; saved runs go to `sql/build_outputs/03_race_test_run1.md` through `03_race_test_run3.md` when using the loop in Step 6. |
-| Compare report performance | `docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/report/01_before_after.sql` | Compares the before-and-after report performance. | `sql/build_outputs/04_before_after.md` |
-| Generate the report pack | `docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/05_report_pack.sql` | Writes the four spreadsheet files. | `sql/report_pack/` and `sql/build_outputs/05_report_pack_proof.md` |
-| Load fresh data | Run the three commands in Step 2 above. **Destructive:** the first command drops and recreates the public schema. | Recreates the schema and reloads the supplied CSV data. | Database tables and loaded row counts. |
+| `run_build.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_build.ps1` | Runs `sql/build/run_all.sql` against the existing database. It does not reset or reload data, or run tests. | Saves command output to `logs/build_run_<timestamp>.md`; the SQL script also writes `sql/build_outputs/01_build_summary.md`. |
+| `run_tests.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1` | Runs the 13 SQL checks and the race-test suite three times. It does not reset or reload data. | Saves detailed results to `logs/test_run_<timestamp>.md`. |
+| `run_monday_report.ps1` | `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_monday_report.ps1` | Generates the four Monday report files. | Writes four CSVs to `sql/report_pack/` and records the run in `logs/monday_report_log.md`. |
 
 ## To try a single order by hand
 
