@@ -23,7 +23,7 @@ It also provides a low-stock view, a record of stock movements, and one addition
 ```text
 Kloud_Kart_Inventory_Order/
 ├── README.md
-├── .env                         # Local database connection settings
+├── .env.example                         # Local database connection settings
 ├── .gitignore
 ├── run_build.ps1
 ├── run_tests.ps1
