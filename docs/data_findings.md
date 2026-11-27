@@ -54,7 +54,7 @@ The checks found errors affecting stock, order totals, customer records and busi
 - **How I detected it:** Compared current stock with stock calculated from movement records.
 - **Scale:** 144 products; 2,553 absolute units difference.
 - **Effect on the client's number:** Stock reporting may be unreliable; associated value is 3,865,699.
-- **What I did about it:** New sales, restocks and corrections now each write their own history row, and a check counts the gaps (144 products; 262,088 old sale rows not linked to an order).
+- **What I did about it:** New sales, restocks and corrections now each write their own history row. The check identifies 144 products whose current stock differs from their movement history. It also finds 262,088 old sale movements without a linked order, so those movements cannot be fully traced back to individual orders.
 - **Residual risk:** The correct stock balance has not been confirmed. The history may itself be incomplete, so a shelf count is the only way to settle it. Who decides: Nana's warehouse team.
 
 ### F-05: Possible duplicate customers — Severity: Medium

@@ -12,20 +12,62 @@ This project fixes two problems for Kloud Kart's operations manager, Nana. The c
 6. **Added one extra.** One command writes Adwoa's report as four spreadsheet files.
 7. **Wrote it up.** Five decision records, a one-page memo to Nana, and the improvement note.
 
-## What is in the folder
+## Data reconciliation
 
-| Where | What |
-|---|---|
-| `docs/data_findings.md` | The data problems, ranked by risk |
-| `decisions/` | Five decision records (ADR-001 to ADR-005) |
-| `client_memo.md` | One-page memo to Nana |
-| `improvement.md` | The improvement beyond the brief |
-| `sql/build/` | The code that builds everything: files 01 to 05, `run_all.sql`, `99_checks.sql` |
-| `sql/build_outputs/` | Saved results: build summary, checks, three race test runs, before and after, report pack proof |
-| `sql/report/` | The before-and-after speed comparison script |
-| `sql/report_pack/` | The four report files written by the improvement |
-| `sql/diagnosis/` and `sql/diagnosis_outputs/` | The checks behind the data findings, and their results |
-| `M03_Resources/` | The files supplied with the brief. **Not changed.** |
+| Stage | Rows | Delta | Reason |
+|---|---|---|---|
+| Orders missing customers | 210 | 665,181 | Missing customer records |
+| Items missing orders | 692 | 826,328 | Missing order records |
+| Inventory records missing products | 120 | — | Missing product records |
+| Products missing from category report | 43 | — | Missing or unreachable categories |
+| Order total mismatches | 2,398 | -3,477,551.62 net | Order totals differ from item totals |
+| Negative stock | 14 products | -27 units | Stock below zero |
+| Stock/history differences | 144 products | 2,553 absolute units | Stock does not match recorded movements |
+| Future-dated orders | 16 on the day of diagnosis; 15 on 27 November 2026 | — | Dates after the day the check was run. One order's date has passed since. |
+| Missing/zero item prices | 300 rows | 298 orders | Missing or zero prices |
+| Shared customer emails | 533 groups | 535 extra rows | Possible duplicate customers |
+
+For methodology, severity-ranked findings, and caveats, see [`docs/data_findings.md`](docs/data_findings.md).
+
+## Project structure
+
+```text
+Kloud_Kart_Inventory_Order/
+├── README.md
+├── M03_Resources/
+│   ├── data/                         # Six source CSV files
+│   ├── load.sql
+│   ├── race_test.py                  # Supplied concurrency test
+│   └── schema.sql
+├── docs/
+│   ├── decisions/                    # ADR-001 through ADR-005
+│   ├── client_memo.md
+│   ├── data_findings.md
+│   └── improvement.md
+├── logs/                             # Captured command/test run reports
+└── sql/
+    ├── build/
+    │   ├── 01_place_order.sql
+    │   ├── 02_low_stock.sql
+    │   ├── 03_monday_report.sql
+    │   ├── 04_stock_trail.sql
+    │   ├── 05_report_pack.sql
+    │   ├── 99_checks.sql             # SQL assertions
+    │   └── run_all.sql
+    ├── build_outputs/                # Generated build, check and test results
+    ├── diagnosis/                    # SQL used to investigate the source data
+    ├── diagnosis_outputs/             # Findings from the diagnosis queries
+    ├── report/
+    │   └── 01_before_after.sql
+    └── tests/                        # Historical test reports and duplicate copies
+```
+
+The canonical test sources are `sql/build/99_checks.sql` and
+`M03_Resources/race_test.py`. The files `sql/tests/01_place_order.sql` and
+`sql/tests/race_test.py` are exact copies of the build script and supplied test,
+respectively; they are not separate tests. The Markdown race-test reports in
+`sql/tests/` are earlier run results, while current generated results go in
+`sql/build_outputs/` or `logs/`.
 
 ## What each build file does
 
@@ -41,19 +83,41 @@ This project fixes two problems for Kloud Kart's operations manager, Nana. The c
 
 ## How to run it
 
-Run each line on its own in PowerShell. The commands assume Windows, Docker Desktop and Python. Docker Desktop must say "Engine running" first.
+## How to run it
+
+**Before you start**
+
+1. Install Docker Desktop and Python on your computer.
+2. Download the project from GitHub by cloning the repository, or download and extract the repository ZIP file.
+3. Open the project folder you downloaded.
+4. Open PowerShell inside that folder. To do this in Windows File Explorer, open the project folder, click the address bar, type `powershell`, and press Enter.
+5. Make sure Docker Desktop is open and shows that the engine is running.
+
+Run the commands below in PowerShell, one step at a time. You must be inside the project folder when you run them.
 
 **Step 1: Start the database (first time only)**
 
-```powershell
-cd C:\Users\YaaAntwi\Documents\Kloud_Kart_Inventory_Order
-```
+If you are creating the database container for the first time, run:
 
 ```powershell
 docker run -d --name kloudkart -e POSTGRES_PASSWORD=kloudkart -p 5432:5432 -v "${PWD}:/lab" postgres:18 -c max_connections=500
 ```
 
-The 500 connections matter, because the test opens 400 at once. If the container already exists, use `docker start kloudkart` instead, then `docker ps -a` and check the status says "Up".
+The 500 connections matter, because the test opens 400 at once.
+
+If the container already exists, use:
+
+```powershell
+docker start kloudkart
+```
+
+Then run:
+
+```powershell
+docker ps -a
+```
+
+Check that the status says "Up".
 
 **Step 2: Load a fresh copy of the data**
 
@@ -69,7 +133,9 @@ docker exec -w /lab/M03_Resources -i kloudkart psql -U postgres -v ON_ERROR_STOP
 docker exec -w /lab/M03_Resources -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f load.sql
 ```
 
-Expect six row counts at the end: 94, 4023, 40420, 159384, 336559 and 282352 (in that table order: categories, products, customers, orders, order items, inventory log). The first command deletes everything in the database, so it is also the reset button.
+Expect six row counts at the end: 94, 4023, 40420, 159384, 336559 and 282352 (in that table order: categories, products, customers, orders, order items, inventory log).
+
+The first command deletes everything in the database, so it is also the reset button.
 
 **Step 3: Make the output folders**
 
@@ -83,7 +149,9 @@ New-Item -ItemType Directory -Force sql\build_outputs, sql\report, sql\report_pa
 docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/run_all.sql
 ```
 
-Expect only notices (lines saying "skipping"). A line starting with `ERROR` is a problem. This writes `sql\build_outputs\01_build_summary.md`.
+Expect only notices (lines saying "skipping"). A line starting with `ERROR` is a problem.
+
+This writes `sql\build_outputs\01_build_summary.md`.
 
 **Step 5: Run the 13 checks**
 
@@ -91,31 +159,53 @@ Expect only notices (lines saying "skipping"). A line starting with `ERROR` is a
 docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/99_checks.sql
 ```
 
-This writes `02_checks.md`. Every row with a result should say `t`.
+This writes `02_checks.md`. Every row with a result should say `t` (true).
 
 **Step 6: Run the race test three times**
+
+Install the Python package needed to connect to the database:
 
 ```powershell
 pip install psycopg2-binary
 ```
 
+Set the database connection details:
+
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:kloudkart@localhost:5432/postgres"
 ```
+
+This tells Python how to connect to the PostgreSQL database running on your computer. The setting applies to programs started from the current PowerShell session.
+
+Set the text encoding:
 
 ```powershell
 $env:PYTHONIOENCODING="utf-8"
 ```
 
+This tells Python to use UTF-8 when reading and writing text through its input and output streams.
+
 ```powershell
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 ```
+
+This tells PowerShell to use UTF-8 when handling text output.
+
+Run the test three times and save each result:
 
 ```powershell
 1..3 | ForEach-Object { $run = $_; $lines = python M03_Resources\race_test.py --verbose 2>&1 | ForEach-Object { "$_" }; Set-Content -Encoding utf8 -Path "sql\build_outputs\03_race_test_run$run.md" -Value (@("# Race test, run $run", "", "Written: $(Get-Date -Format 'yyyy-MM-dd HH:mm')", "", '```text') + $lines + '```') }
 ```
 
-Each of the three files should end with a line starting `PASSED`, and Test 2 should show `50 sold, 350 refused, 0 errored`. The test cleans up after itself. Do not edit `race_test.py`.
+The test creates competing purchase attempts to check that stock is not oversold.
+
+Each of the three files should end with a line starting `PASSED`, and Test 2 should show `50 sold, 350 refused, 0 errored`.
+
+- `50 sold` means 50 purchase attempts succeeded.
+- `350 refused` means 350 attempts were rejected because the available stock was no longer sufficient.
+- `0 errored` means no attempts failed with unexpected errors.
+
+The three saved files provide evidence that the test was repeated and that the results were recorded. The test cleans up after itself. Do not edit `race_test.py`.
 
 **Step 7: Run the before-and-after speed comparison**
 
@@ -133,39 +223,28 @@ docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/buil
 
 Expect `COPY 100`, `COPY 40420`, `COPY 485040` and `COPY 1`. The files appear in `sql\report_pack`.
 
-**To try a single order by hand**
+## Automated runs
+
+Run these commands from PowerShell in the project root. The full clean workflow
+is the sequence in Steps 2–8 above; there is no single full-workflow runner
+script in the current project.
+
+| Run | Command | What it does | Results |
+|---|---|---|---|
+| Build SQL objects | `docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/run_all.sql` | Creates or replaces the order, low-stock, report and stock-trail objects. | `sql/build_outputs/01_build_summary.md` |
+| Run the 13 SQL checks | `docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/99_checks.sql` | Checks the built views, report totals and stock trail. | `sql/build_outputs/02_checks.md` |
+| Run the concurrency suite | `python M03_Resources\race_test.py --verbose` | Runs all four race-test scenarios once. Repeat three times for the recorded three-run evidence. | Terminal output; saved runs go to `sql/build_outputs/03_race_test_run1.md` through `03_race_test_run3.md` when using the loop in Step 6. |
+| Compare report performance | `docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/report/01_before_after.sql` | Compares the before-and-after report performance. | `sql/build_outputs/04_before_after.md` |
+| Generate the report pack | `docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/05_report_pack.sql` | Writes the four spreadsheet files. | `sql/report_pack/` and `sql/build_outputs/05_report_pack_proof.md` |
+| Load fresh data | Run the three commands in Step 2 above. **Destructive:** the first command drops and recreates the public schema. | Recreates the schema and reloads the supplied CSV data. | Database tables and loaded row counts. |
+
+## To try a single order by hand
 
 ```powershell
 docker exec -i kloudkart psql -U postgres -c "SELECT * FROM place_order(100001, 5001, 1);"
 ```
 
 This makes a real sale. Run Step 2 again afterwards to get back to a clean load.
-
-## Decisions, in one line each
-
-| Record | Decision | Main alternative rejected |
-|---|---|---|
-| ADR-001 | Reserve the product record so buyers take turns, with a 5-second wait limit | A strict database setting that cancels the second buyer with an error |
-| ADR-002 | A trigger or a bigger server would not have fixed overselling | Relying on a trigger, or buying hardware |
-| ADR-003 | The order, restock and correction steps write the stock history | A trigger that logs every change |
-| ADR-004 | The Monday report is built in one pass, with no new index | A bigger server, an index, or a stored copy |
-| ADR-005 | Low stock follows the category tree to any depth, with a cut-off of 5 | A fixed number of joins, or a sales-speed cut-off |
-
-## Open decisions and who owns them
-
-| Decision or question | Why it matters | Who decides | What happens next |
-|---|---|---|---|
-| True stock for the 14 negative products and 144 mismatches | Stock numbers cannot be trusted until counted | Nana's warehouse team | Shelf count, then use the correction step |
-| What each order status means; whether pending and shipped count as spend | Changes every spending figure | Nana, with Adwoa | Update the report rules |
-| Which order totals are right (2,398 disagree) | Decides whether old totals are rewritten | Nana or finance | Fix old records, with before and after counts |
-| Duplicate customers (1,068 records) | Splits rankings and counts | Someone who reviews the pairs | Merge only the confirmed pairs |
-| Orphan records, future dates, missing prices | Left out of the report, not deleted | Nana | Recover, correct or delete |
-| Correct categories for 43 products | They are missing from category totals | Marketing, with Nana | Reassign, then the loop and gaps close |
-| Low-stock cut-off (now 5) | A list of 1,424 may be too long | Nana | One command to change it |
-| Wait limit (now 5 seconds) | Too short could turn buyers away | Nana, with whoever looks after the website | One number in three steps |
-| Stock changed only through the three steps | Hand-typed changes leave no record | Nana, with whoever looks after the website | Remove direct edit rights, or add a trigger |
-| Weekly automatic Monday files | Adwoa still types one command | Whoever looks after the server, with Adwoa | Set up a weekly schedule |
-| Which clock the dates use | Month boundaries could shift | Whoever looks after the server | Confirm and document |
 
 ## What the project does not do
 
@@ -178,4 +257,6 @@ This makes a real sale. Run Step 2 again afterwards to get back to a clean load.
 
 ## Note on the evidence files
 
-Two test sales (orders 665625 and 665626) were made after the evidence files were written, while testing the wait limit. They do not change the counts in the checks.
+Two additional orders (665625 and 665626) were created during testing of the 5-second wait limit. They were created after the saved check results, so they are not included in those earlier results.
+
+The 5-second lock limit and the response to a lock timeout are implemented in `sql/build/01_place_order.sql`, under the `place_order` function. You can review this file to see how the limit is enforced.

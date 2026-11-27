@@ -1,6 +1,6 @@
 # Memo to Nana
 
-**From:** Yaa Antwi
+**From:** Data Engineering Consultant
 **Date:** 27 November 2026
 **Subject:** Overselling fixed, Monday report now takes seconds
 

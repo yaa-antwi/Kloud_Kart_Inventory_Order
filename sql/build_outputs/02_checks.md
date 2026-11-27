@@ -12,8 +12,8 @@ One row per check. A row with t in the passed column passed. A row with nothing 
             4 | Category tree: deepest level reached (information)                          | 4                                   | 4 in the loaded data                                                | 
             5 | Category tree: categories reached out of all categories (information)       | 91 of 94                            | 3 are in a loop or have a missing parent                            | 
             6 | Report: every customer appears once                                         | 40420                               | 40420                                                               | t
-            7 | Report: total spent equals an independent sum                               | 428442749.40                        | 428442749.40                                                        | t
-            8 | Report: order count equals an independent count                             | 140015                              | 140015                                                              | t
+            7 | Report: total spent equals an independent sum                               | 428442855.48                        | 428442855.48                                                        | t
+            8 | Report: order count equals an independent count                             | 140017                              | 140017                                                              | t
             9 | Report: 12 months for every customer                                        | 485040                              | 485040                                                              | t
            10 | Report: last running total equals total spent (customers that differ)       | 0                                   | 0                                                                   | t
            11 | Report: top 100 has 100 rows (more only if tied at rank 100)                | 100                                 | 100                                                                 | t
@@ -37,7 +37,7 @@ customer_rows_sharing_an_email                  | 1068
 ## What the stock trail cannot explain (one row)
 ```text
 -[ RECORD 1 ]-----------------------------------+-------
-movement_rows                                   | 282352
+movement_rows                                   | 282354
 sales_with_no_order_link                        | 262088
 movements_naming_a_missing_order                | 0
 movements_naming_a_missing_product              | 120

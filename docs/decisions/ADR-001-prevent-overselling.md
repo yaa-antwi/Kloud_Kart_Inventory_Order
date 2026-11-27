@@ -1,8 +1,8 @@
-# ADR-001: Stop overselling by making buyers take turns
+# ADR-001: Prevent overselling by making buyers take turns
 
 - **Status:** Accepted
 - **Date:** 2026-11-27
-- **Decision owner:** Yaa Antwi
+- **Decision owner:** Data Engineering Consultant
 
 ## Context
 

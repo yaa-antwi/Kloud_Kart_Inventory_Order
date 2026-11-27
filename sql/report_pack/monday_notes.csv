@@ -1,0 +1,2 @@
+report_written_at,orders_with_no_customer_on_file,orders_dated_in_the_future,cancelled_or_refunded_orders,counted_orders_whose_total_disagrees_with_items,customer_rows_sharing_an_email
+2026-11-27 14:27:22,210,15,19176,2111,1068
