@@ -32,7 +32,7 @@
 --      again". With no limit one stuck transaction freezes every buyer of the
 --      product. 5 seconds is shorter than the 10 second flash sale in the brief.
 --      Measured on the client's machine: with 400 buyers released at the same
---      instant, the longest wait was about 1.3 seconds, so 5 seconds leaves
+--      instant, the longest wait was about 1.1 seconds, so 5 seconds leaves
 --      about 4 times the room. A limit under about 2 seconds would leave too
 --      little room, and a buyer could be told "Busy" while stock exists.
 --      The limit sits on the function, so the caller's own setting is
@@ -47,10 +47,13 @@
 --   F. One product per call, as the test fixes. A single product cannot
 --      deadlock. If orders with several products are ever added, lock the
 --      products in product_id order.
+--   G. The stock history row is written by this function, in the same
+--      transaction as the stock change. No trigger is used.
 
 -- READ THIS
 --   Stock changes must go through place_order (sales), restock_product or
---   correct_stock (file 04). The trigger in file 04 rejects direct stock edits.
+--   correct_stock (file 04). A stock number typed in by hand skips these and
+--   leaves NO history row. That is a stated limit of this design.
 
 -- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/01_place_order.sql
 
@@ -102,9 +105,6 @@ DECLARE
     v_stock    integer;
     v_price    numeric;
     v_order_id bigint;
-    v_previous_reason   text;
-    v_previous_note     text;
-    v_previous_order_id text;
 BEGIN
     -- refuse bad input with a normal reply, not an error
     IF p_quantity IS NULL OR p_quantity <= 0 THEN
@@ -145,27 +145,20 @@ BEGIN
         RETURN;
     END IF;
 
-    INSERT INTO orders (customer_id, order_date, status, total_amount)
-    VALUES (p_customer_id, now(), 'pending', v_price * p_quantity)
-    RETURNING orders.order_id INTO v_order_id;
-
-    v_previous_reason := current_setting('kloudkart.stock_change_reason', true);
-    v_previous_note := current_setting('kloudkart.stock_change_note', true);
-    v_previous_order_id := current_setting('kloudkart.stock_change_order_id', true);
-    PERFORM set_config('kloudkart.stock_change_reason', 'sale', true);
-    PERFORM set_config('kloudkart.stock_change_note', 'order ' || v_order_id, true);
-    PERFORM set_config('kloudkart.stock_change_order_id', v_order_id::text, true);
-
     UPDATE products
        SET stock_quantity = stock_quantity - p_quantity
      WHERE products.product_id = p_product_id;
 
-    PERFORM set_config('kloudkart.stock_change_reason', coalesce(v_previous_reason, ''), true);
-    PERFORM set_config('kloudkart.stock_change_note', coalesce(v_previous_note, ''), true);
-    PERFORM set_config('kloudkart.stock_change_order_id', coalesce(v_previous_order_id, ''), true);
+    INSERT INTO orders (customer_id, order_date, status, total_amount)
+    VALUES (p_customer_id, now(), 'pending', v_price * p_quantity)
+    RETURNING orders.order_id INTO v_order_id;
 
     INSERT INTO order_items (order_id, product_id, quantity, unit_price)
     VALUES (v_order_id, p_product_id, p_quantity, v_price);
+
+    -- decision G: the history row, in the same transaction as the stock change
+    INSERT INTO inventory_log (product_id, change_qty, reason, created_at, note, order_id)
+    VALUES (p_product_id, -p_quantity, 'sale', now(), 'order ' || v_order_id, v_order_id);
 
     RETURN QUERY SELECT true, v_order_id, 'Order placed'::text;
 END $$;
