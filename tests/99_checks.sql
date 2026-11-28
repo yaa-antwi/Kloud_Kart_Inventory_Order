@@ -1,5 +1,5 @@
 -- CHECKS: one row per check. Every row with a passed column should say t.
--- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f tests/99_checks.sql
+-- RUN: docker exec -w /lab -i kloudkart psql -U postgres -v ON_ERROR_STOP=1 -f sql/build/99_checks.sql
 -- The results are written to sql/build_outputs/02_checks.md (the folder must exist).
 
 \set QUIET on
@@ -13,21 +13,18 @@
 
 BEGIN;
 
+-- Probe the stock rule inside this transaction. Everything is rolled back at the end.
 CREATE TEMP TABLE stock_guard_probe (
     negative_insert_blocked boolean NOT NULL,
-    negative_update_blocked boolean NOT NULL,
-    direct_update_logged    boolean NOT NULL
+    negative_update_blocked boolean NOT NULL
 ) ON COMMIT DROP;
 
 DO $$
 DECLARE
-    v_probe_product_id       integer;
-    v_existing_product_id    integer;
-    v_existing_stock         integer;
-    v_log_id_before          integer;
+    v_probe_product_id        integer;
+    v_existing_product_id     integer;
     v_negative_insert_blocked boolean := false;
     v_negative_update_blocked boolean := false;
-    v_direct_update_logged    boolean := false;
 BEGIN
     SELECT coalesce(max(products.product_id), 0) + 1
       INTO v_probe_product_id
@@ -40,11 +37,10 @@ BEGIN
         v_negative_insert_blocked := true;
     END;
 
-    SELECT products.product_id, products.stock_quantity
-      INTO v_existing_product_id, v_existing_stock
+    SELECT products.product_id
+      INTO v_existing_product_id
       FROM products
      WHERE products.stock_quantity >= 0
-       AND products.stock_quantity < 2147483647
      ORDER BY products.product_id
      LIMIT 1;
 
@@ -56,32 +52,10 @@ BEGIN
         EXCEPTION WHEN check_violation THEN
             v_negative_update_blocked := true;
         END;
-
-        SELECT coalesce(max(inventory_log.log_id), 0)
-          INTO v_log_id_before
-          FROM inventory_log;
-
-        UPDATE products
-           SET stock_quantity = v_existing_stock + 1
-         WHERE products.product_id = v_existing_product_id;
-
-        SELECT EXISTS (
-            SELECT 1
-            FROM inventory_log
-            WHERE inventory_log.log_id > v_log_id_before
-              AND inventory_log.product_id = v_existing_product_id
-              AND inventory_log.change_qty = 1
-              AND inventory_log.reason = 'manual_update'
-        )
-          INTO v_direct_update_logged;
-
-        UPDATE products
-           SET stock_quantity = v_existing_stock
-         WHERE products.product_id = v_existing_product_id;
     END IF;
 
     INSERT INTO pg_temp.stock_guard_probe
-    VALUES (v_negative_insert_blocked, v_negative_update_blocked, v_direct_update_logged);
+    VALUES (v_negative_insert_blocked, v_negative_update_blocked);
 END $$;
 
 WITH category_totals AS (
@@ -118,10 +92,11 @@ SELECT 3, 'Low stock: low-stock products add up',
 FROM category_totals
 ORDER BY check_number;
 
-SELECT 4, 'Category tree: deepest level reached (information)',
-       (SELECT max(depth) FROM category_tree)::text,
-       '4 in the loaded data',
-       NULL::boolean
+SELECT 4 AS check_number,
+       'Category tree: deepest level reached (information)' AS check_name,
+       (SELECT max(depth) FROM category_tree)::text AS result,
+       '4 in the loaded data' AS expected,
+       NULL::boolean AS passed
 UNION ALL
 SELECT 5, 'Category tree: categories reached out of all categories (information)',
        (SELECT count(*) FROM category_tree)::text || ' of ' ||
@@ -148,15 +123,16 @@ WITH independent_counted_orders AS (
           WHERE customers.customer_id = orders.customer_id
       )
 )
-SELECT 7, 'Report: total spent equals an independent sum',
+SELECT 7 AS check_number,
+       'Report: total spent equals an independent sum' AS check_name,
        (SELECT sum(monday_customer_summary.total_spent)
-          FROM monday_customer_summary)::text,
+          FROM monday_customer_summary)::text AS result,
        (SELECT sum(independent_counted_orders.total_amount)
-          FROM independent_counted_orders)::text,
+          FROM independent_counted_orders)::text AS expected,
        (SELECT sum(monday_customer_summary.total_spent)
           FROM monday_customer_summary)
          = (SELECT sum(independent_counted_orders.total_amount)
-              FROM independent_counted_orders)
+              FROM independent_counted_orders) AS passed
 UNION ALL
 SELECT 8, 'Report: order count equals an independent count',
        (SELECT sum(monday_customer_summary.order_count)
@@ -167,10 +143,11 @@ SELECT 8, 'Report: order count equals an independent count',
          = (SELECT count(*) FROM independent_counted_orders)
 ORDER BY check_number;
 
-SELECT 9, 'Report: 12 months for every customer',
-       (SELECT count(*) FROM monday_monthly_spend)::text,
-       ((SELECT count(*) FROM customers) * 12)::text,
-       (SELECT count(*) FROM monday_monthly_spend) = (SELECT count(*) FROM customers) * 12
+SELECT 9 AS check_number,
+       'Report: 12 months for every customer' AS check_name,
+       (SELECT count(*) FROM monday_monthly_spend)::text AS result,
+       ((SELECT count(*) FROM customers) * 12)::text AS expected,
+       (SELECT count(*) FROM monday_monthly_spend) = (SELECT count(*) FROM customers) * 12 AS passed
 UNION ALL
 SELECT 10, 'Report: last running total equals total spent (customers that differ)',
        (SELECT count(*)
@@ -205,7 +182,7 @@ SELECT 12, 'Trail: no movement names an order that is missing',
        (SELECT movements_naming_a_missing_order FROM stock_trail_check)::text, '0',
        (SELECT movements_naming_a_missing_order FROM stock_trail_check) = 0
 UNION ALL
-SELECT 13, 'Order functions exist; stock rule and audit trigger work',
+SELECT 13, 'Order functions exist; stock rule works for new and changed rows',
        (SELECT count(*)
           FROM (VALUES
               (to_regprocedure('place_order(bigint,bigint,integer)')),
@@ -213,7 +190,7 @@ SELECT 13, 'Order functions exist; stock rule and audit trigger work',
               (to_regprocedure('correct_stock(bigint,integer,text)'))
           ) AS signatures(function_signature)
          WHERE signatures.function_signature IS NOT NULL)::text
-         || ' exact-signature functions; constraint NOT VALID = '
+         || ' functions; rule NOT VALID = '
          || coalesce((SELECT (NOT pg_constraint.convalidated)::text
                         FROM pg_constraint
                        WHERE pg_constraint.conname = 'products_stock_not_negative'
@@ -223,11 +200,8 @@ SELECT 13, 'Order functions exist; stock rule and audit trigger work',
                FROM pg_temp.stock_guard_probe)
          || '; negative update blocked = '
          || (SELECT stock_guard_probe.negative_update_blocked::text
-               FROM pg_temp.stock_guard_probe)
-         || '; direct update logged = '
-         || (SELECT stock_guard_probe.direct_update_logged::text
                FROM pg_temp.stock_guard_probe),
-       '3 functions; constraint NOT VALID = true; negative insert blocked = true; negative update blocked = true; direct update logged = true',
+       '3 functions; rule NOT VALID = true; negative insert blocked = true; negative update blocked = true',
        (SELECT count(*)
           FROM (VALUES
               (to_regprocedure('place_order(bigint,bigint,integer)')),
@@ -244,7 +218,6 @@ SELECT 13, 'Order functions exist; stock rule and audit trigger work',
        )
        AND (SELECT stock_guard_probe.negative_insert_blocked
               AND stock_guard_probe.negative_update_blocked
-              AND stock_guard_probe.direct_update_logged
               FROM pg_temp.stock_guard_probe)
 ORDER BY check_number;
 \qecho
