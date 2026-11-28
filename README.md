@@ -159,7 +159,6 @@ __pycache__/
 *.pyc
 ```
 
-The `.env` file is not encrypted. Do not share it or commit it to GitHub.
 
 ### Step 3: Load a fresh copy of the data
 
@@ -308,32 +307,6 @@ docker exec -i kloudkart psql -U postgres -c "SELECT * FROM place_order(100001, 
 It uses customer `100001`, product `5001` and a quantity of one.
 
 This changes the database. To return to the original supplied data, follow Step 3 and reload the database.
-
-## Data quality and operational limits
-
-- Direct updates to `products.stock_quantity` are rejected by a guard trigger. Use `place_order`, `restock_product` or `correct_stock`; database superusers can bypass this operational guard.
-- The `products_stock_not_negative` check is `NOT VALID` so the 14 existing negative-stock rows do not prevent deployment. PostgreSQL still enforces it on new inserts and updates; the check suite verifies that behavior. A physical stock count is still needed to correct the old rows.
-- The 14 negative stock counts and 144 stock-history differences found during the investigation have not been corrected. Run `sql/diagnosis/02_wrong_numbers.sql` to review the full diagnosis. To get just the two counts, run:
-
-  ```sql
-  WITH movement_totals AS (
-      SELECT product_id, sum(change_qty) AS logged_stock
-      FROM inventory_log
-      GROUP BY product_id
-  )
-  SELECT count(*) FILTER (WHERE products.stock_quantity < 0) AS negative_stock_products,
-         count(*) FILTER (
-             WHERE products.stock_quantity IS DISTINCT FROM coalesce(movement_totals.logged_stock, 0)
-         ) AS stock_history_differences
-  FROM products
-  LEFT JOIN movement_totals ON movement_totals.product_id = products.product_id;
-  ```
-
-- The Monday CSV exports include customer names and email addresses. Treat them as sensitive business data; keep `report_pack/` local and do not share the files unless authorized.
-- The four-file report export runs on demand. It is not scheduled.
-- Adwoa's actual report was not available for testing. The reported 40-minute duration has not been independently verified; the before-and-after comparison uses a reconstruction of the likely report calculation.
-- The exact information displayed to customers on the website and the time zone used for date fields have not been verified.
-- The strict-setting and 120-level category-chain experiments were run on an older practice database. They are not represented as evidence from the shipped database; the automated checks report only what they run against the current schema.
 
 ## Notes on the test evidence
 
